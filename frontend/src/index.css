@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Denari Brand Colors */
+    --denari-1: 205 64% 15%;      /* Deep Navy */
+    --denari-2: 200 71% 26%;      /* Steel Blue */
+    --denari-3: 185 56% 42%;      /* Teal - Primary Action */
+    --denari-4: 162 17% 60%;      /* Sage - Muted Text */
+    --denari-5: 147 20% 29%;      /* Evergreen - Success */
+    --denari-6: 48 48% 54%;       /* Gold - Accent */
+
+    /* Semantic Tokens */
+    --background: 0 0% 100%;
+    --foreground: 205 64% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 205 64% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 205 64% 15%;
+
+    --primary: 185 56% 42%;        /* Teal */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 200 71% 26%;      /* Steel Blue */
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 162 17% 95%;
+    --muted-foreground: 162 17% 40%;
+
+    --accent: 48 48% 54%;          /* Gold */
+    --accent-foreground: 205 64% 15%;
+
+    --success: 147 20% 29%;        /* Evergreen */
+    --success-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 162 17% 85%;
+    --input: 162 17% 90%;
+    --ring: 185 56% 42%;
+
+    --radius: 1rem;
+
+    /* Gradients */
+    --gradient-hero: linear-gradient(135deg, hsl(var(--denari-1)) 0%, hsl(var(--denari-2)) 100%);
+    --gradient-card: linear-gradient(180deg, hsl(var(--denari-2)) 0%, hsl(var(--denari-1)) 100%);
+    
+    /* Shadows */
+    --shadow-soft: 0 4px 6px -1px hsl(var(--denari-1) / 0.1), 0 2px 4px -1px hsl(var(--denari-1) / 0.06);
+    --shadow-elevated: 0 20px 25px -5px hsl(var(--denari-1) / 0.1), 0 10px 10px -5px hsl(var(--denari-1) / 0.04);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
