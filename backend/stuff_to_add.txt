@@ -1,0 +1,5 @@
+NEED 
+- requirements.txt
+- Dockerfile
+- Docler-compose.yml
+- README.md <-Backend specific
