@@ -14,9 +14,9 @@ Those belong in core/security and the model/service layers respectively.
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-# from app.core.security import verify_password, create_access_token  # Token + password utilities
-# from app.core.database import get_db  # DB session dependency
-# from app.models.user import User  # ORM model representing system users
+from app.core.security import verify_password, create_access_token  # Token + password utilities
+from app.core.database import get_db  # DB session dependency
+from app.models.user import User  # ORM model representing system users
 
 router = APIRouter(
     prefix="/auth",

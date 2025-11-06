@@ -28,7 +28,7 @@ from typing import List, Optional
 
 from app.core.database import get_db
 from app.models.xbrl_fact import XbrlFact  # ORM for normalized facts
-# from app.services.kpis import compute_kpis  # Optional derived metrics layer (future use)
+from app.services.kpis import compute_kpis  # Optional derived metrics layer (future use)
 
 router = APIRouter(
     prefix="/financials",
