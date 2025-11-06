@@ -26,7 +26,8 @@ This module does NOT:
 """
 
 import os
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -41,18 +42,22 @@ class Settings(BaseSettings):
     SUPABASE_DB_URL: str = Field(..., description="Postgres connection string provided by Supabase")
 
     # External APIs (MVP: FMP key; Yahoo fallback handled in adapter)
-    # TODO ANY API KEY WE ACTUALLY FUCKING USE 
+    FMP_API_KEY: str = Field(..., description="Financial Modeling Prep API key for market data") 
 
-    # Security / Auth
-    JWT_SECRET_KEY: str = Field(..., description="Secret key used to sign JWT access tokens")
+    # Security / Auth (optional for testing - provide defaults)
+    JWT_SECRET_KEY: str = Field(
+        default="dummy-secret-key-for-testing-only-change-in-production",
+        description="Secret key used to sign JWT access tokens"
+    )
     JWT_EXPIRE_MINUTES: int = Field(60, description="Access token lifetime in minutes")
 
     # Optional future config
     ENV: str = Field("development", description="'development' | 'production' environment flag")
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8"
+    )
 
 
 # Singleton pattern — settings imported anywhere will reference same object.
