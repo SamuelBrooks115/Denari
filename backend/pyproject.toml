@@ -15,11 +15,12 @@ dependencies = [
     "python-dotenv (>=1.2.1,<2.0.0)",
     "ipykernel (>=7.1.0,<8.0.0)",
     "supabase (>=2.0.0,<3.0.0)",
-    "psycopg (>=3.2.12,<4.0.0)",
+    "psycopg[binary] (>=3.2.12,<4.0.0)",
     "sqlalchemy (>=2.0.44,<3.0.0)",
     "python-jose[cryptography] (>=3.5.0,<4.0.0)",
     "passlib (>=1.7.4,<2.0.0)",
-    "xlsxwriter (>=3.2.9,<4.0.0)"
+    "xlsxwriter (>=3.2.9,<4.0.0)",
+    "uvicorn (>=0.38.0,<0.39.0)"
 ]
 
 
