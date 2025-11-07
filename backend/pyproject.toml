@@ -1,0 +1,29 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Samuel Brooks",email = "samuel111503@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi (>=0.121.0,<0.122.0)",
+    "pandas (>=2.3.3,<3.0.0)",
+    "numpy (>=2.3.4,<3.0.0)",
+    "jupyter (>=1.1.1,<2.0.0)",
+    "python-dotenv (>=1.2.1,<2.0.0)",
+    "ipykernel (>=7.1.0,<8.0.0)",
+    "supabase (>=2.0.0,<3.0.0)",
+    "psycopg[binary] (>=3.2.12,<4.0.0)",
+    "sqlalchemy (>=2.0.44,<3.0.0)",
+    "python-jose[cryptography] (>=3.5.0,<4.0.0)",
+    "passlib (>=1.7.4,<2.0.0)",
+    "xlsxwriter (>=3.2.9,<4.0.0)",
+    "uvicorn (>=0.38.0,<0.39.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
