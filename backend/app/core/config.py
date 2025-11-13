@@ -26,7 +26,8 @@ This module does NOT:
 """
 
 import os
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -47,12 +48,39 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str = Field(..., description="Secret key used to sign JWT access tokens")
     JWT_EXPIRE_MINUTES: int = Field(60, description="Access token lifetime in minutes")
 
+    # Ingestion / EDGAR
+    EDGAR_USER_AGENT: str = Field(
+        "Denari/1.0 (contact: ingestion@denari.ai)",
+        description="SEC-compliant User-Agent string for EDGAR requests",
+    )
+    EDGAR_REQUEST_SLEEP_SECONDS: float = Field(
+        0.45,
+        description="Polite delay between EDGAR requests (seconds)",
+    )
+    EDGAR_REQUEST_TIMEOUT_SECONDS: int = Field(
+        45,
+        description="HTTP timeout for EDGAR requests (seconds)",
+    )
+    EDGAR_MAX_RETRIES: int = Field(
+        4,
+        description="Maximum retry attempts for EDGAR requests",
+    )
+    EDGAR_BACKOFF_BASE: float = Field(
+        0.6,
+        description="Exponential backoff base for retry delays",
+    )
+    SP500_TICKER_SOURCE: str = Field(
+        "",
+        description="Optional path or URL to cached S&P 500 constituents CSV/JSON",
+    )
+
     # Optional future config
     ENV: str = Field("development", description="'development' | 'production' environment flag")
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
 
 
 # Singleton pattern — settings imported anywhere will reference same object.
