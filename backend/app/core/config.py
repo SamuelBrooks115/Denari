@@ -6,17 +6,15 @@ Purpose:
 - Load and validate environment variables from `.env` or OS environment.
 - Make configuration accessible across:
     * database.py
-    * security.py
     * ingestion adapters (Yahoo / EDGAR API keys)
-    * modeling parameter defaults (e.g., discount rate, projection years)
 - Prevent "magic strings" scattered across code.
 
 MVP Requirements:
 - Must load:
     SUPABASE_DB_URL
-    Yahoo Finance free endpoint (no key required)
-    JWT_SECRET_KEY
-    JWT_EXPIRE_MINUTES
+    SUPABASE_URL
+    SUPABASE_SERVICE_ROLE_KEY
+    EDGAR_USER_AGENT
 - Should not fail silently — fail fast if critical config missing.
 
 This module does NOT:
@@ -44,13 +42,6 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_ROLE_KEY: str = Field(..., description="Supabase service role key for backend ingestion")
 
     # External APIs (MVP: Yahoo Finance - no key required) 
-
-    # Security / Auth
-    JWT_SECRET_KEY: str = Field(
-        "dev-secret",
-        description="Secret key used to sign JWT access tokens",
-    )
-    JWT_EXPIRE_MINUTES: int = Field(60, description="Access token lifetime in minutes")
 
     # Ingestion / EDGAR
     EDGAR_USER_AGENT: str = Field(

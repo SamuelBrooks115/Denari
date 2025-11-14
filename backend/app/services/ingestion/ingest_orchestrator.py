@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.models.company import Company
-from app.models.job import Job
 from app.services.ingestion.pipelines import SP500IngestionPipeline
 from app.services.ingestion.repositories import XbrlRepository
 
@@ -40,28 +39,20 @@ class IngestOrchestrator:
         return result
 
     def prepare_company(self, company_id: int, years: int = 5) -> Dict[str, Any]:
-        job = Job(company_id=company_id, job_type="prepare")
-        self._db.add(job)
-        self._db.commit()
-        self._db.refresh(job)
-
         try:
             company = self._db.query(Company).filter(Company.id == company_id).first()
             if not company:
-                job.mark_failed("Company not found.")
-                self._db.commit()
+                logger.warning("Company not found: %s", company_id)
                 return {"error": "company_not_found"}
 
             if not company.cik:
-                job.mark_failed("Company missing CIK; cannot fetch EDGAR filings.")
-                self._db.commit()
+                logger.warning("Company missing CIK: %s", company.ticker)
                 return {"error": "cik_missing"}
 
             try:
                 cik_int = int(company.cik)
             except ValueError as exc:
-                job.mark_failed("Invalid CIK stored for company.")
-                self._db.commit()
+                logger.error("Invalid CIK stored for company %s: %s", company.ticker, company.cik)
                 raise RuntimeError("Invalid company CIK") from exc
 
             logger.info("Preparing data for company %s (CIK %s)", company.ticker, company.cik)
@@ -73,12 +64,6 @@ class IngestOrchestrator:
                 company_id=company.id,
             )
 
-            job.mark_completed(
-                message="Ingestion completed.",
-                details=ingestion_result,
-            )
-            self._db.commit()
-
             return {
                 "company": company.ticker,
                 "status": "success",
@@ -87,8 +72,6 @@ class IngestOrchestrator:
 
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception("Error in prepare_company: %s", exc)
-            job.mark_failed(str(exc))
-            self._db.commit()
             raise
 
 

@@ -87,34 +87,106 @@ def infer_canonical_from_label(label: str) -> Optional[str]:
     def contains(*keywords: str) -> bool:
         return all(keyword in text for keyword in keywords)
 
+    # Income Statement
     if any(keyword in text for keyword in ("revenue", "sales")):
-        return "Revenue"
+        return "revenue"
     if "cost of revenue" in text or "cost of goods" in text:
-        return "COGS"
+        return "cogs"
     if "gross profit" in text:
-        return "GrossProfit"
-    if contains("research", "development"):
-        return "R&D"
-    if ("selling" in text and "administrative" in text) or "sga" in text:
-        return "SG&A"
+        return "gross_profit"
+    if "operating expense" in text or "operating cost" in text:
+        return "operating_expense"
+    if contains("research", "development") or "r&d" in text:
+        return "research_and_development"
+    if ("selling" in text and "administrative" in text) or "sga" in text or "s&g" in text:
+        return "selling_general_administrative"
     if "operating income" in text or "operating profit" in text:
-        return "OperatingIncome"
-    if "income tax" in text or "tax expense" in text:
-        return "TaxExpense"
-    if "net income" in text or "profit loss" in text:
-        return "NetIncome"
+        return "operating_income"
+    if "interest expense" in text or ("interest" in text and "debt" in text and "expense" in text):
+        return "interest_expense"
+    if "depreciation" in text and "amortization" in text:
+        return "depreciation_amortization"
+    if "depreciation" in text and "amortization" not in text:
+        return "depreciation_amortization"
+    if "amortization" in text and "intangible" in text:
+        return "depreciation_amortization"
+    if "nonoperating income" in text or "other income expense" in text:
+        return "nonoperating_income"
+    if "pretax" in text or "before tax" in text or ("income" in text and "before" in text and "tax" in text):
+        return "pretax_income"
+    if "income tax" in text or "tax expense" in text or "provision for income tax" in text:
+        return "income_tax"
+    if "net income" in text or "profit loss" in text or "net earnings" in text:
+        return "net_income"
+    
+    # Cash Flow
     if "net cash" in text and "operating activities" in text:
-        return "CFO"
+        return "cfo"
+    if "net cash" in text and "investing activities" in text:
+        return "cfi"
+    if "net cash" in text and "financing activities" in text:
+        return "cff"
     if "property" in text and any(k in text for k in ("capital expenditures", "acquire", "purchases")):
-        return "CapEx"
-    if "accounts receivable" in text:
-        return "AR"
-    if "accounts payable" in text:
-        return "AP"
+        return "capex"
+    if "stock based compensation" in text or "share based compensation" in text:
+        return "stock_based_compensation"
+    if "working capital" in text and "change" in text:
+        return "working_capital_changes"
+    if "dividends paid" in text or "payment of dividend" in text:
+        return "dividends_paid"
+    if "proceeds" in text and "debt" in text and ("issuance" in text or "issue" in text):
+        return "debt_issued"
+    if ("repayment" in text and "debt" in text) or ("debt" in text and "repay" in text):
+        return "debt_repaid"
+    if ("repurchase" in text and ("stock" in text or "share" in text)) or "treasury stock" in text:
+        return "share_repurchases"
+    
+    # Balance Sheet
+    if "total assets" in text or ("assets" in text and "total" in text):
+        return "total_assets"
+    if "current assets" in text:
+        return "current_assets"
+    if "cash" in text and "equivalent" in text:
+        return "cash_and_equivalents"
+    if "accounts receivable" in text or ("receivable" in text and "current" in text):
+        return "accounts_receivable"
     if "inventory" in text:
-        return "Inventory"
-    if "equity" in text and "total" in text:
-        return "Equity"
+        return "inventory"
+    if "property" in text and "plant" in text and "equipment" in text:
+        return "ppe_net"
+    if "goodwill" in text:
+        return "goodwill"
+    if "intangible assets" in text:
+        return "intangible_assets"
+    if "total liabilities" in text or ("liabilities" in text and "total" in text):
+        return "total_liabilities"
+    if "current liabilities" in text:
+        return "current_liabilities"
+    if "accounts payable" in text:
+        return "accounts_payable"
+    if "long term debt" in text or "long-term debt" in text:
+        return "long_term_debt"
+    if ("shareholders equity" in text or "stockholders equity" in text) or ("equity" in text and "total" in text):
+        return "shareholders_equity"
+    
+    # Share Data
+    if "shares outstanding" in text and "basic" in text:
+        return "shares_basic"
+    if "weighted average" in text and "shares" in text and "basic" in text:
+        return "shares_basic"
+    if "shares outstanding" in text and "diluted" in text:
+        return "shares_diluted"
+    if "weighted average" in text and "shares" in text and "diluted" in text:
+        return "shares_diluted"
+    if "earnings per share" in text and "basic" in text:
+        return "eps_basic"
+    if "earnings per share" in text and "diluted" in text:
+        return "eps_diluted"
+    if "shares outstanding" in text and "basic" not in text and "diluted" not in text:
+        return "shares_outstanding"
+    if "common stock" in text and "shares" in text and "outstanding" in text:
+        return "shares_outstanding"
+    
     return None
 
 

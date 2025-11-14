@@ -171,31 +171,69 @@ class SupabaseDBClient:
             return 0
 
         now_iso = datetime.utcnow().isoformat()
-        rows = []
+        
+        # Extract dates to check for existing records
+        price_dates = [item["date"].isoformat() for item in price_rows]
+        
+        # Query existing records for this listing and dates
+        existing_response = (
+            self._client.table("PRICE_EOD")
+            .select("price_id, price_date")
+            .eq("listing_id", str(listing_id))
+            .in_("price_date", price_dates)
+            .execute()
+        )
+        
+        # Create a set of existing dates for fast lookup
+        existing_dates = {record["price_date"] for record in existing_response.data or []}
+        existing_by_date = {record["price_date"]: record["price_id"] for record in existing_response.data or []}
+        
+        rows_to_insert = []
+        rows_to_update = []
+        
         for item in price_rows:
-            price_date = item["date"]
-            rows.append(
-                {
-                    "price_id": str(uuid.uuid4()),
-                    "listing_id": str(listing_id),
-                    "price_date": price_date.isoformat(),
-                    "open": item.get("open"),
-                    "high": item.get("high"),
-                    "low": item.get("low"),
-                    "close": item["close"],
-                    "adj_close": item.get("adj_close") or item.get("close"),
-                    "volume": item.get("volume"),
-                    "currency": currency,
-                    "as_of_ts": now_iso,
-                    "source_id": str(self._config.data_source_id) if self._config.data_source_id else None,
-                }
-            )
-
+            price_date = item["date"].isoformat()
+            # Convert volume to int if present (database expects bigint, not float)
+            volume = item.get("volume")
+            volume_int = int(volume) if volume is not None else None
+            
+            row_data = {
+                "listing_id": str(listing_id),
+                "price_date": price_date,
+                "open": item.get("open"),
+                "high": item.get("high"),
+                "low": item.get("low"),
+                "close": item["close"],
+                "adj_close": item.get("adj_close") or item.get("close"),
+                "volume": volume_int,
+                "currency": currency,
+                "as_of_ts": now_iso,
+                "source_id": str(self._config.data_source_id) if self._config.data_source_id else None,
+            }
+            
+            if price_date in existing_dates:
+                # Update existing record
+                row_data["price_id"] = existing_by_date[price_date]
+                rows_to_update.append(row_data)
+            else:
+                # Insert new record
+                row_data["price_id"] = str(uuid.uuid4())
+                rows_to_insert.append(row_data)
+        
         try:
-            response = self._client.table("PRICE_EOD").upsert(rows, on_conflict="listing_id,price_date").execute()
+            # Insert new records
+            if rows_to_insert:
+                self._client.table("PRICE_EOD").insert(rows_to_insert).execute()
+            
+            # Update existing records
+            if rows_to_update:
+                for row in rows_to_update:
+                    price_id = row.pop("price_id")
+                    self._client.table("PRICE_EOD").update(row).eq("price_id", price_id).execute()
+            
+            return len(rows_to_insert) + len(rows_to_update)
         except Exception as e:
             raise RuntimeError(f"Failed to upsert PRICE_EOD rows: {e}") from e
-        return len(rows)
 
     # ------------------------------------------------------------------ #
     # Financial statements & facts
@@ -273,9 +311,9 @@ class SupabaseDBClient:
     def store_raw_companyfacts(self, company_id: uuid.UUID, report_date: str, payload: Dict[str, Any]) -> Optional[uuid.UUID]:
         report_id = uuid.uuid4()
         checksum = str(abs(hash(json.dumps(payload, sort_keys=True))))
+        # Note: company_id is embedded in storage_uri path since REPORT_ARTIFACT table doesn't have company_id column
         artifact_payload = {
             "report_id": str(report_id),
-            "company_id": str(company_id),
             "created_at": datetime.utcnow().isoformat(),
             "format": "json",
             "mime_type": "application/json",

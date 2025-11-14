@@ -24,6 +24,7 @@ class PeriodStatements:
     income_statement: Dict[str, StatementLine]
     balance_sheet: Dict[str, StatementLine]
     cash_flow_statement: Dict[str, StatementLine]
+    share_data: Dict[str, StatementLine]
 
 
 def detect_primary_taxonomy(facts: Dict[str, Any]) -> Optional[str]:
@@ -70,7 +71,13 @@ def build_period_statements(
     income = _build_statement(taxonomy_facts, canonical_maps.IS_ALIASES, report_date, instant=False)
     cash = _build_statement(taxonomy_facts, canonical_maps.CF_ALIASES, report_date, instant=False)
     balance = _build_statement(taxonomy_facts, canonical_maps.BS_ALIASES, report_date, instant=True)
-    return PeriodStatements(income_statement=income, cash_flow_statement=cash, balance_sheet=balance)
+    share_data = _build_statement(taxonomy_facts, canonical_maps.SHARE_ALIASES, report_date, instant=False)
+    return PeriodStatements(
+        income_statement=income,
+        cash_flow_statement=cash,
+        balance_sheet=balance,
+        share_data=share_data,
+    )
 
 
 def _build_statement(

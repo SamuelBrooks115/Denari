@@ -13,37 +13,51 @@ from .companyfacts_parser import PeriodStatements, StatementLine, infer_canonica
 
 STATEMENT_TYPE_BY_CANONICAL: Mapping[str, str] = {
     # Income statement
-    "Revenue": "IS",
-    "COGS": "IS",
-    "GrossProfit": "IS",
-    "R&D": "IS",
-    "SG&A": "IS",
-    "OperatingIncome": "IS",
-    "TaxExpense": "IS",
-    "NetIncome": "IS",
+    "revenue": "IS",
+    "cogs": "IS",
+    "gross_profit": "IS",
+    "operating_expense": "IS",
+    "research_and_development": "IS",
+    "selling_general_administrative": "IS",
+    "operating_income": "IS",
+    "interest_expense": "IS",
+    "depreciation_amortization": "IS",
+    "nonoperating_income": "IS",
+    "pretax_income": "IS",
+    "income_tax": "IS",
+    "net_income": "IS",
     # Cash flow
-    "CFO": "CF",
-    "CapEx": "CF",
-    "CFI": "CF",
-    "CFF": "CF",
-    "FCF": "CF",
+    "cfo": "CF",
+    "cfi": "CF",
+    "cff": "CF",
+    "capex": "CF",
+    "stock_based_compensation": "CF",
+    "working_capital_changes": "CF",
+    "dividends_paid": "CF",
+    "debt_issued": "CF",
+    "debt_repaid": "CF",
+    "share_repurchases": "CF",
+    "fcf": "CF",
     # Balance sheet
-    "Assets": "BS",
-    "AssetsCurrent": "BS",
-    "CashAndCashEquivalents": "BS",
-    "CashAndShortTermInvestments": "BS",
-    "ShortTermInvestments": "BS",
-    "AR": "BS",
-    "Inventory": "BS",
-    "PPENet": "BS",
-    "Goodwill": "BS",
-    "IntangiblesNet": "BS",
-    "Liabilities": "BS",
-    "LiabilitiesCurrent": "BS",
-    "AP": "BS",
-    "LongTermDebt": "BS",
-    "Equity": "BS",
-    "RetainedEarnings": "BS",
+    "total_assets": "BS",
+    "current_assets": "BS",
+    "cash_and_equivalents": "BS",
+    "accounts_receivable": "BS",
+    "inventory": "BS",
+    "ppe_net": "BS",
+    "goodwill": "BS",
+    "intangible_assets": "BS",
+    "total_liabilities": "BS",
+    "current_liabilities": "BS",
+    "accounts_payable": "BS",
+    "long_term_debt": "BS",
+    "shareholders_equity": "BS",
+    # Share data
+    "shares_basic": "SHARES",
+    "shares_diluted": "SHARES",
+    "eps_basic": "SHARES",
+    "eps_diluted": "SHARES",
+    "shares_outstanding": "SHARES",
 }
 
 
@@ -144,6 +158,7 @@ class CompanyFactsNormalizer:
         consume("IS", statements.income_statement)
         consume("CF", statements.cash_flow_statement)
         consume("BS", statements.balance_sheet)
+        consume("SHARES", statements.share_data)
 
         self._apply_derivations(canonical_entries)
 
@@ -171,12 +186,12 @@ class CompanyFactsNormalizer:
     # ------------------------------------------------------------------ #
     def _apply_derivations(self, canonical_entries: Dict[str, Dict[str, Any]]) -> None:
         # Gross Profit
-        if "GrossProfit" not in canonical_entries and {"Revenue", "COGS"}.issubset(canonical_entries):
-            revenue = canonical_entries["Revenue"]["value"]
-            cogs = canonical_entries["COGS"]["value"]
-            canonical_entries["GrossProfit"] = {
+        if "gross_profit" not in canonical_entries and {"revenue", "cogs"}.issubset(canonical_entries):
+            revenue = canonical_entries["revenue"]["value"]
+            cogs = canonical_entries["cogs"]["value"]
+            canonical_entries["gross_profit"] = {
                 "value": revenue - cogs,
-                "unit": canonical_entries["Revenue"].get("unit"),
+                "unit": canonical_entries["revenue"].get("unit"),
                 "source_tag": None,
                 "method": "derived",
                 "confidence": 0.6,
@@ -184,12 +199,12 @@ class CompanyFactsNormalizer:
             }
 
         # Free Cash Flow
-        if "FCF" not in canonical_entries and {"CFO", "CapEx"}.issubset(canonical_entries):
-            cfo = canonical_entries["CFO"]["value"]
-            capex = canonical_entries["CapEx"]["value"]
-            canonical_entries["FCF"] = {
+        if "fcf" not in canonical_entries and {"cfo", "capex"}.issubset(canonical_entries):
+            cfo = canonical_entries["cfo"]["value"]
+            capex = canonical_entries["capex"]["value"]
+            canonical_entries["fcf"] = {
                 "value": cfo - abs(capex),
-                "unit": canonical_entries["CFO"].get("unit"),
+                "unit": canonical_entries["cfo"].get("unit"),
                 "source_tag": None,
                 "method": "derived",
                 "confidence": 0.6,
