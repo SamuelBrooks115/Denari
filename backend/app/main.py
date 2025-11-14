@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.logging import configure_logging
-from app.api.v1 import auth, companies, filings, financials, jobs, models, exports
+from app.api.v1 import companies, filings, financials
 
 # -----------------------------------------------------------------------------
 # App Initialization
@@ -44,13 +44,9 @@ app.add_middleware(
 # Router Registration
 # -----------------------------------------------------------------------------
 
-app.include_router(auth.router)
 app.include_router(companies.router)
 app.include_router(filings.router)
 app.include_router(financials.router)
-app.include_router(jobs.router)
-app.include_router(models.router)
-app.include_router(exports.router)
 
 # -----------------------------------------------------------------------------
 # Health Check

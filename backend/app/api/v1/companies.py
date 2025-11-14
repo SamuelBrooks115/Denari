@@ -8,7 +8,7 @@ Purpose:
 
 Key Interactions:
 - app.services.ingestion.ingest_orchestrator → runs the full data readiness pipeline.
-- app.services.ingestion.prices_adapter → fetches EOD prices from FMP/Yahoo.
+- app.services.ingestion.prices_adapter → fetches EOD prices from Yahoo Finance.
 - app.services.ingestion.edgar_adapter → fetches filings when historicals are missing.
 - app.models.company → ORM model representing company records.
 - app.core.database → DB session.
