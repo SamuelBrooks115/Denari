@@ -116,14 +116,24 @@ class SP500IngestionPipeline:
 
         normalized = self._normalizer.normalize_companyfacts(company_meta, taxonomy, statements_by_period)
         persisted_periods: List[str] = []
+        period_results: List[Dict[str, Any]] = []
         for period_end, facts in normalized.items():
             filing_meta = {
                 "ticker": ticker,
                 "cik": cik,
                 "period_end": period_end,
-                "taxonomy": taxonomy,
+                "filing_type": "10-K",
             }
-            self._repository.upsert_company_period(company_id, filing_meta, facts)
+            result = self._repository.persist_period(
+                company_id=company_id,
+                filing_meta=filing_meta,
+                normalized_facts=facts,
+                filing_type="10-K",
+                report_date=period_end,
+                taxonomy=taxonomy,
+                raw_payload=facts_payload,
+            )
+            period_results.append(result)
             persisted_periods.append(period_end)
 
         return {
@@ -131,6 +141,7 @@ class SP500IngestionPipeline:
             "cik": cik,
             "taxonomy": taxonomy,
             "periods": persisted_periods,
+            "details": period_results,
             "status": "ok",
         }
 

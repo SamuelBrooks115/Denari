@@ -40,12 +40,17 @@ class Settings(BaseSettings):
     """
     # Database
     SUPABASE_DB_URL: str = Field(..., description="Postgres connection string provided by Supabase")
+    SUPABASE_URL: str = Field(..., description="Supabase project URL for API client")
+    SUPABASE_SERVICE_ROLE_KEY: str = Field(..., description="Supabase service role key for backend ingestion")
 
     # External APIs (MVP: FMP key; Yahoo fallback handled in adapter)
     # TODO ANY API KEY WE ACTUALLY FUCKING USE 
 
     # Security / Auth
-    JWT_SECRET_KEY: str = Field(..., description="Secret key used to sign JWT access tokens")
+    JWT_SECRET_KEY: str = Field(
+        "dev-secret",
+        description="Secret key used to sign JWT access tokens",
+    )
     JWT_EXPIRE_MINUTES: int = Field(60, description="Access token lifetime in minutes")
 
     # Ingestion / EDGAR
@@ -80,6 +85,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        extra="ignore",
     )
 
 
