@@ -28,8 +28,14 @@ from app.core.config import settings
 # -----------------------------------------------------------------------------
 
 # Create database engine using SUPABASE_DB_URL from environment
+# Use psycopg (v3) driver - SQLAlchemy 2.0+ supports psycopg3
+# Convert postgresql:// to postgresql+psycopg:// if not already specified
+db_url = settings.SUPABASE_DB_URL
+if db_url.startswith("postgresql://") and "+" not in db_url.split("://")[0]:
+    db_url = db_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
 engine = create_engine(
-    settings.SUPABASE_DB_URL,
+    db_url,
     pool_pre_ping=True  # Ensures connections are valid before use
 )
 

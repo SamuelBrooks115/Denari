@@ -20,7 +20,9 @@ dependencies = [
     "python-jose[cryptography] (>=3.5.0,<4.0.0)",
     "passlib (>=1.7.4,<2.0.0)",
     "xlsxwriter (>=3.2.9,<4.0.0)",
-    "uvicorn (>=0.38.0,<0.39.0)"
+    "uvicorn (>=0.38.0,<0.39.0)",
+    "requests (>=2.32.0,<3.0.0)",
+    "pydantic-settings (>=2.0.0,<3.0.0)"
 ]
 
 
