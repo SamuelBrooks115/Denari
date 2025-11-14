@@ -8,7 +8,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from supabase import Client, create_client
 
@@ -59,9 +59,10 @@ class SupabaseDBClient:
             "cik": cik,
             "created_at": datetime.utcnow().isoformat(),
         }
-        result = self._client.table("COMPANY").insert(payload).execute()
-        if result.error:
-            raise RuntimeError(f"Failed to insert company: {result.error}")
+        try:
+            result = self._client.table("COMPANY").insert(payload).execute()
+        except Exception as e:
+            raise RuntimeError(f"Failed to insert company: {e}") from e
         if ticker:
             self._ensure_identifier(company_id, ticker)
         return company_id
@@ -95,9 +96,106 @@ class SupabaseDBClient:
             "effective_from": datetime.utcnow().isoformat(),
             "source": "edgar_ingestion",
         }
-        insert_response = self._client.table("IDENTIFIER").insert(ident_payload).execute()
-        if insert_response.error:
-            logger.warning("Failed to insert identifier for %s: %s", ticker, insert_response.error)
+        try:
+            insert_response = self._client.table("IDENTIFIER").insert(ident_payload).execute()
+        except Exception as e:
+            logger.warning("Failed to insert identifier for %s: %s", ticker, e)
+
+    # ------------------------------------------------------------------ #
+    # Security & Listing helpers
+    def ensure_security(self, company_id: uuid.UUID, security_type: str = "equity", share_class: Optional[str] = None) -> uuid.UUID:
+        response = (
+            self._client.table("SECURITY")
+            .select("*")
+            .eq("company_id", str(company_id))
+            .limit(1)
+            .execute()
+        )
+        if response.data:
+            return uuid.UUID(response.data[0]["security_id"])
+
+        security_id = uuid.uuid4()
+        payload = {
+            "security_id": str(security_id),
+            "company_id": str(company_id),
+            "security_type": security_type,
+            "share_class": share_class,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        try:
+            insert_response = self._client.table("SECURITY").insert(payload).execute()
+        except Exception as e:
+            raise RuntimeError(f"Failed to insert security: {e}") from e
+        return security_id
+
+    def ensure_listing(
+        self,
+        security_id: uuid.UUID,
+        symbol: str,
+        exchange: Optional[str] = None,
+    ) -> uuid.UUID:
+        response = (
+            self._client.table("LISTING")
+            .select("*")
+            .eq("security_id", str(security_id))
+            .eq("symbol", symbol.upper())
+            .limit(1)
+            .execute()
+        )
+        if response.data:
+            return uuid.UUID(response.data[0]["listing_id"])
+
+        listing_id = uuid.uuid4()
+        now_iso = datetime.utcnow().isoformat()
+        payload = {
+            "listing_id": str(listing_id),
+            "security_id": str(security_id),
+            "symbol": symbol.upper(),
+            "exchange": exchange,
+            "effective_from": now_iso,
+            "effective_to": None,
+        }
+        try:
+            insert_response = self._client.table("LISTING").insert(payload).execute()
+        except Exception as e:
+            raise RuntimeError(f"Failed to insert listing: {e}") from e
+        return listing_id
+
+    def upsert_price_eod(
+        self,
+        listing_id: uuid.UUID,
+        price_rows: Sequence[Dict[str, Any]],
+        currency: str = "USD",
+    ) -> int:
+        if not price_rows:
+            return 0
+
+        now_iso = datetime.utcnow().isoformat()
+        rows = []
+        for item in price_rows:
+            price_date = item["date"]
+            rows.append(
+                {
+                    "price_id": str(uuid.uuid4()),
+                    "listing_id": str(listing_id),
+                    "price_date": price_date.isoformat(),
+                    "open": item.get("open"),
+                    "high": item.get("high"),
+                    "low": item.get("low"),
+                    "close": item["close"],
+                    "adj_close": item.get("adj_close") or item.get("close"),
+                    "volume": item.get("volume"),
+                    "currency": currency,
+                    "as_of_ts": now_iso,
+                    "source_id": str(self._config.data_source_id) if self._config.data_source_id else None,
+                }
+            )
+
+        try:
+            response = self._client.table("PRICE_EOD").upsert(rows, on_conflict="listing_id,price_date").execute()
+        except Exception as e:
+            raise RuntimeError(f"Failed to upsert PRICE_EOD rows: {e}") from e
+        return len(rows)
 
     # ------------------------------------------------------------------ #
     # Financial statements & facts
@@ -133,9 +231,10 @@ class SupabaseDBClient:
             "source_id": str(self._config.data_source_id) if self._config.data_source_id else None,
             "fiscal_period": "FY",
         }
-        response = self._client.table("FINANCIAL_STATEMENT").insert(payload).execute()
-        if response.error:
-            raise RuntimeError(f"Failed to insert financial statement: {response.error}")
+        try:
+            response = self._client.table("FINANCIAL_STATEMENT").insert(payload).execute()
+        except Exception as e:
+            raise RuntimeError(f"Failed to insert financial statement: {e}") from e
         return stmt_id
 
     def insert_financial_facts(
@@ -164,9 +263,10 @@ class SupabaseDBClient:
         if not rows:
             return
 
-        response = self._client.table("FINANCIAL_FACT").insert(rows).execute()
-        if response.error:
-            raise RuntimeError(f"Failed to insert financial facts: {response.error}")
+        try:
+            response = self._client.table("FINANCIAL_FACT").insert(rows).execute()
+        except Exception as e:
+            raise RuntimeError(f"Failed to insert financial facts: {e}") from e
 
     # ------------------------------------------------------------------ #
     # Raw payload archival
@@ -183,9 +283,10 @@ class SupabaseDBClient:
             "checksum": checksum,
             "org_id": str(self._config.org_id) if self._config.org_id else None,
         }
-        response = self._client.table("REPORT_ARTIFACT").insert(artifact_payload).execute()
-        if response.error:
-            logger.warning("Failed to store raw company facts: %s", response.error)
+        try:
+            response = self._client.table("REPORT_ARTIFACT").insert(artifact_payload).execute()
+        except Exception as e:
+            logger.warning("Failed to store raw company facts: %s", e)
             return None
         return report_id
 

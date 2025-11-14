@@ -3,7 +3,7 @@ prices_adapter.py — Market Data Ingestion (Daily Closing Prices)
 
 Purpose:
 - Ensure daily price history (price_bar) is complete and up to date.
-- Fetch missing days from WHERE EVER THE FUCK WE GET IT FROM.
+- Fetch missing days from Yahoo Finance.
 - Insert or update rows in price_bar.
 
 Key Concept:
@@ -20,20 +20,56 @@ This module does NOT:
 """
 
 from datetime import date, timedelta
-from typing import Optional
+from typing import Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
-import requests
+import yfinance as yf
+import pandas as pd
 
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.company import Company
 from app.models.price_bar import PriceBar
 
 logger = get_logger(__name__)
 
-# FMP API key is available via settings.FMP_API_KEY
-FMP_BASE_URL = "https://financialmodelingprep.com/api/v3"
+
+# Custom exceptions for Yahoo Finance errors
+class YahooFinanceError(Exception):
+    """Base exception for Yahoo Finance errors."""
+    pass
+
+
+class YahooFinanceNetworkError(YahooFinanceError):
+    """Raised when network/connection errors occur fetching Yahoo Finance data."""
+    pass
+
+
+class YahooFinanceTickerError(YahooFinanceError):
+    """Raised when ticker is invalid or no data is available."""
+    pass
+
+
+def _validate_and_clamp_dates(from_date: date, to_date: date) -> Tuple[date, date]:
+    """
+    Validate and clamp dates to prevent future dates and ensure from_date <= to_date.
+
+    Args:
+        from_date: Start date (may be in future)
+        to_date: End date (may be in future)
+
+    Returns:
+        Tuple of (validated_from_date, validated_to_date) where:
+        - Both dates are clamped to today if in the future
+        - from_date <= to_date (swapped if needed)
+    """
+    today = date.today()
+    # Clamp to today if future
+    from_date = min(from_date, today)
+    to_date = min(to_date, today)
+    # Ensure from <= to
+    if from_date > to_date:
+        from_date, to_date = to_date, from_date
+    return from_date, to_date
 
 
 def get_latest_price_date(company_id: int, db: Session) -> Optional[date]:
@@ -60,7 +96,7 @@ def get_latest_price_date(company_id: int, db: Session) -> Optional[date]:
 
 def fetch_prices_from_vendor(ticker: str, start_date: Optional[date]) -> list[dict]:
     """
-    Fetch price bars from FMP (Financial Modeling Prep) API.
+    Fetch price bars from Yahoo Finance.
 
     Args:
         ticker: Stock ticker symbol (e.g., "AAPL")
@@ -71,15 +107,16 @@ def fetch_prices_from_vendor(ticker: str, start_date: Optional[date]) -> list[di
         List of dicts with price data:
         [
             {"date": date, "close": float, "open": float|None, "high": float|None,
-             "low": float|None, "volume": float|None},
+             "low": float|None, "volume": float|None, "adj_close": float|None},
             ...
         ]
-        Returns empty list on error.
+        Returns empty list if no data available or on non-critical errors.
 
     Raises:
-        None - errors are logged and empty list is returned.
+        YahooFinanceTickerError: If ticker is invalid or no data available
+        YahooFinanceNetworkError: If network/connection errors occur
+        YahooFinanceError: For other Yahoo Finance errors
     """
-    api_key = settings.FMP_API_KEY
     today = date.today()
 
     # Determine date range
@@ -92,65 +129,80 @@ def fetch_prices_from_vendor(ticker: str, start_date: Optional[date]) -> list[di
         from_date = start_date + timedelta(days=1)
         logger.info("Fetching price data for %s from %s to %s", ticker, from_date, today)
 
-    # Build API URL
-    url = f"{FMP_BASE_URL}/historical-price-full/{ticker}"
-    params = {
-        "apikey": api_key,
-        "from": from_date.strftime("%Y-%m-%d"),
-        "to": today.strftime("%Y-%m-%d")
-    }
+    # Validate and clamp dates to prevent future dates
+    from_date, to_date = _validate_and_clamp_dates(from_date, today)
+
+    # Check if date range is valid
+    if from_date > to_date:
+        logger.warning("Invalid date range for %s: from_date %s > to_date %s", ticker, from_date, to_date)
+        return []
 
     try:
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()  # Raises HTTPError for bad responses
+        # Create yfinance Ticker object
+        ticker_obj = yf.Ticker(ticker)
 
-        data = response.json()
+        # Fetch historical data
+        # yfinance expects dates as strings or date objects
+        hist = ticker_obj.history(start=from_date, end=to_date)
 
-        # Check for FMP error responses
-        if isinstance(data, dict):
-            if "Error Message" in data:
-                logger.error("FMP API error for %s: %s", ticker, data["Error Message"])
-                return []
-            if "historical" in data:
-                historical_data = data["historical"]
-            else:
-                logger.warning("Unexpected FMP API response format for %s: %s", ticker, data)
-                return []
-        elif isinstance(data, list):
-            historical_data = data
-        else:
-            logger.warning("Unexpected FMP API response format for %s", ticker)
-            return []
+        # Check if DataFrame is empty (invalid ticker or no data)
+        if hist.empty:
+            error_msg = f"No price data available for ticker {ticker} in date range {from_date} to {to_date}"
+            logger.warning(error_msg)
+            raise YahooFinanceTickerError(error_msg)
 
-        # Convert FMP format to our format
+        # Convert DataFrame to list of dicts
         price_bars = []
-        for item in historical_data:
-            # Parse date string to date object
-            price_date = date.fromisoformat(item["date"])
+        for idx, row in hist.iterrows():
+            # yfinance returns DatetimeIndex, convert to date
+            if isinstance(idx, pd.Timestamp):
+                price_date = idx.date()
+            elif hasattr(idx, 'date'):
+                price_date = idx.date()
+            else:
+                logger.warning("Unexpected date index type for %s: %s", ticker, type(idx))
+                continue
 
+            # Extract OHLCV data, handling NaN values
+            # yfinance columns: Open, High, Low, Close, Volume, Dividends, Stock Splits
+            # Note: yfinance uses "Adj Close" but we'll get it from the Close column
+            # and calculate adjusted close if needed
+            open_val = row.get("Open")
+            high_val = row.get("High")
+            low_val = row.get("Low")
+            close_val = row.get("Close")
+            adj_close_val = row.get("Adj Close") if "Adj Close" in row else close_val
+            volume_val = row.get("Volume")
+
+            # Convert NaN to None for optional fields
             price_bar = {
                 "date": price_date,
-                "close": float(item.get("close", 0)),
-                "open": float(item["open"]) if item.get("open") is not None else None,
-                "high": float(item["high"]) if item.get("high") is not None else None,
-                "low": float(item["low"]) if item.get("low") is not None else None,
-                "volume": float(item["volume"]) if item.get("volume") is not None else None,
+                "open": float(open_val) if pd.notna(open_val) else None,
+                "high": float(high_val) if pd.notna(high_val) else None,
+                "low": float(low_val) if pd.notna(low_val) else None,
+                "close": float(close_val) if pd.notna(close_val) else 0.0,
+                "adj_close": float(adj_close_val) if pd.notna(adj_close_val) else None,
+                "volume": float(volume_val) if pd.notna(volume_val) else None,
             }
             price_bars.append(price_bar)
-
-        # FMP returns data in reverse chronological order (newest first)
-        # Reverse to get chronological order (oldest first)
-        price_bars.reverse()
 
         logger.info("Fetched %d price bars for %s", len(price_bars), ticker)
         return price_bars
 
-    except requests.exceptions.RequestException as e:
-        logger.error("Failed to fetch prices from FMP for %s: %s", ticker, str(e))
-        return []
-    except (KeyError, ValueError, TypeError) as e:
-        logger.error("Error parsing FMP response for %s: %s", ticker, str(e))
-        return []
+    except YahooFinanceTickerError:
+        # Re-raise ticker errors
+        raise
+    except Exception as e:
+        # Check if it's a network-related error
+        error_str = str(e).lower()
+        if any(keyword in error_str for keyword in ["network", "connection", "timeout", "dns", "resolve"]):
+            error_msg = f"Network error fetching Yahoo Finance data for {ticker}: {str(e)}"
+            logger.error(error_msg)
+            raise YahooFinanceNetworkError(error_msg) from e
+        else:
+            error_msg = f"Error fetching Yahoo Finance data for {ticker}: {str(e)}"
+            logger.error(error_msg)
+            raise YahooFinanceError(error_msg) from e
 
 
 def upsert_price_bars(company_id: int, price_data: list[dict], db: Session) -> int:
@@ -295,6 +347,28 @@ def ensure_prices_fresh(company: Company, db: Session) -> bool:
             logger.info("No price records were upserted for %s", company.ticker)
             return False
 
+    except YahooFinanceTickerError as e:
+        # Log ticker errors but don't crash the pipeline
+        logger.error(
+            "Yahoo Finance ticker error for %s (company_id: %d): %s",
+            company.ticker, company.id, str(e)
+        )
+        # Return False instead of raising to allow pipeline to continue
+        return False
+    except YahooFinanceNetworkError as e:
+        logger.error(
+            "Yahoo Finance network error for %s (company_id: %d): %s",
+            company.ticker, company.id, str(e)
+        )
+        # Re-raise network errors as they may be transient
+        raise
+    except YahooFinanceError as e:
+        logger.error(
+            "Yahoo Finance error ensuring price freshness for %s (company_id: %d): %s",
+            company.ticker, company.id, str(e)
+        )
+        # Re-raise to allow caller to handle the error
+        raise
     except Exception as e:
         logger.error(
             "Error ensuring price freshness for %s (company_id: %d): %s",

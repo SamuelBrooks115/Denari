@@ -7,14 +7,14 @@ Purpose:
 - Make configuration accessible across:
     * database.py
     * security.py
-    * ingestion adapters (FMP / Yahoo / EDGAR API keys)
+    * ingestion adapters (Yahoo / EDGAR API keys)
     * modeling parameter defaults (e.g., discount rate, projection years)
 - Prevent "magic strings" scattered across code.
 
 MVP Requirements:
 - Must load:
     SUPABASE_DB_URL
-    FMP_API_KEY (or Yahoo Finance free endpoint, no key required)
+    Yahoo Finance free endpoint (no key required)
     JWT_SECRET_KEY
     JWT_EXPIRE_MINUTES
 - Should not fail silently — fail fast if critical config missing.
@@ -43,8 +43,7 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = Field(..., description="Supabase project URL for API client")
     SUPABASE_SERVICE_ROLE_KEY: str = Field(..., description="Supabase service role key for backend ingestion")
 
-    # External APIs (MVP: FMP key; Yahoo fallback handled in adapter)
-    # TODO ANY API KEY WE ACTUALLY FUCKING USE 
+    # External APIs (MVP: Yahoo Finance - no key required) 
 
     # Security / Auth
     JWT_SECRET_KEY: str = Field(
