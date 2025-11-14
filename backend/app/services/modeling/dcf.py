@@ -8,11 +8,9 @@ Purpose:
 - Add Terminal Value (TV)
 - Return enterprise value (EV), and optionally equity value/share price
 
-Inputs:
-- company_id
-- model_version (optional)
-- DB session (to load snapshot or working assumptions)
-- Must call run_three_statement() first to obtain projected FCFs
+Inputs (MVP - no database):
+- projections: Dict from run_three_statement() containing free_cash_flow array
+- assumptions: Dict with WACC, terminal_growth_rate, etc.
 
 Outputs (JSON-serializable):
 {
@@ -20,6 +18,7 @@ Outputs (JSON-serializable):
   "discount_factors": [...],
   "pv_fcf": [...],
   "terminal_value": float,
+  "pv_terminal_value": float,
   "enterprise_value": float,
   "equity_value": float | None,
   "implied_share_price": float | None
@@ -30,40 +29,97 @@ This module does NOT:
 - Produce Excel output
 """
 
-from sqlalchemy.orm import Session
-from typing import Dict, Any
-
-from app.services.modeling.three_statement import run_three_statement
-from app.models.valuation_model import ValuationModel
-from app.models.model_snapshot import ModelSnapshot
+from typing import Dict, Any, List
 
 
-def run_dcf(company_id: int,
-            model_version: str | None,
-            db: Session) -> Dict[str, Any]:
+def run_dcf(
+    projections: Dict[str, Any],
+    assumptions: Dict[str, Any],
+) -> Dict[str, Any]:
     """
-    Main entrypoint for DCF valuation.
+    Main entrypoint for DCF valuation (MVP - no database).
 
-    High-Level Steps:
-    1. Call run_three_statement() → get projected free cash flows.
-    2. Load WACC + terminal value inputs:
-        - If model_version provided → from ModelSnapshot
-        - Else → from ValuationModel (current working assumptions)
-    3. Apply discount factors:
-           PV_FCF[t] = FCF[t] / (1 + WACC)^(t+1)
-    4. Compute Terminal Value:
-           TV = FCF[last] * (1 + g) / (WACC - g)
-       or optionally:
-           TV = EBIT * Exit Multiple (future extension)
-    5. Enterprise Value = sum(PV_FCF) + PV(TV)
-    6. If desired → compute equity value:
-           EV - Debt + Cash
-    7. Optionally compute implied share price:
-           EquityValue / SharesOutstanding
+    Args:
+        projections: Output from run_three_statement() containing:
+            - free_cash_flow: List[float]
+            - periods: List[str]
+        assumptions: Dict with keys:
+            - wacc: float (weighted average cost of capital, e.g., 0.10 for 10%)
+            - terminal_growth_rate: float (perpetual growth rate, e.g., 0.025 for 2.5%)
+            - shares_outstanding: float | None (for share price calculation)
+            - debt: float | None (for equity value calculation)
+            - cash: float | None (for equity value calculation)
 
-    TODO:
-    - Implement discounting math after projection model is in place.
-    - Add support for exit multiple terminal value alternative.
-    - Add optional equity bridge (Cash & Debt from Balance Sheet if available).
+    Returns:
+        Dictionary with DCF valuation results
     """
-    raise NotImplementedError("run_dcf() requires projected free cash flow inputs and WACC/terminal assumptions.")
+    fcf_list = projections.get("free_cash_flow", [])
+    periods = projections.get("periods", [])
+    
+    if not fcf_list:
+        raise ValueError("No free cash flow projections provided")
+
+    # Extract assumptions with defaults
+    wacc = assumptions.get("wacc", 0.10)  # 10% default
+    terminal_growth = assumptions.get("terminal_growth_rate", 0.025)  # 2.5% default
+    shares_outstanding = assumptions.get("shares_outstanding")
+    debt = assumptions.get("debt", 0.0)
+    cash = assumptions.get("cash", 0.0)
+
+    # Validate WACC and terminal growth
+    if wacc <= 0:
+        raise ValueError("WACC must be positive")
+    if terminal_growth >= wacc:
+        raise ValueError("Terminal growth rate must be less than WACC")
+
+    # Step 1: Calculate present value of each projected FCF
+    pv_fcf: List[float] = []
+    discount_factors: List[float] = []
+    
+    for i, fcf in enumerate(fcf_list):
+        # Discount factor: 1 / (1 + WACC)^(period_number)
+        # Period 1 is discounted by 1 year, period 2 by 2 years, etc.
+        discount_factor = 1.0 / ((1 + wacc) ** (i + 1))
+        discount_factors.append(discount_factor)
+        
+        pv = fcf * discount_factor
+        pv_fcf.append(pv)
+
+    # Step 2: Calculate Terminal Value
+    # Using Gordon Growth Model: TV = FCF[last] * (1 + g) / (WACC - g)
+    last_fcf = fcf_list[-1]
+    terminal_value = last_fcf * (1 + terminal_growth) / (wacc - terminal_growth)
+
+    # Step 3: Discount Terminal Value to present
+    # TV is at end of projection period, so discount by number of periods
+    num_periods = len(fcf_list)
+    pv_terminal_value = terminal_value / ((1 + wacc) ** num_periods)
+
+    # Step 4: Calculate Enterprise Value
+    # EV = Sum of PV(FCF) + PV(Terminal Value)
+    enterprise_value = sum(pv_fcf) + pv_terminal_value
+
+    # Step 5: Calculate Equity Value (if balance sheet data available)
+    equity_value = None
+    implied_share_price = None
+    
+    if shares_outstanding is not None:
+        # Equity Value = Enterprise Value - Debt + Cash
+        equity_value = enterprise_value - debt + cash
+        
+        # Implied share price
+        if shares_outstanding > 0:
+            implied_share_price = equity_value / shares_outstanding
+
+    return {
+        "fcf": fcf_list,
+        "discount_factors": discount_factors,
+        "pv_fcf": pv_fcf,
+        "terminal_value": terminal_value,
+        "pv_terminal_value": pv_terminal_value,
+        "enterprise_value": enterprise_value,
+        "equity_value": equity_value,
+        "implied_share_price": implied_share_price,
+        "wacc": wacc,
+        "terminal_growth_rate": terminal_growth,
+    }

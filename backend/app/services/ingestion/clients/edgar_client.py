@@ -65,15 +65,16 @@ class EdgarClientSettings:
 
     @classmethod
     def from_app_settings(cls) -> "EdgarClientSettings":
-        cache_env = os.getenv("EDGAR_CACHE_DIR")
-        cache_path = Path(cache_env).expanduser() if cache_env else None
+        # MVP: Disable caching - always fetch live from EDGAR
+        # cache_env = os.getenv("EDGAR_CACHE_DIR")
+        # cache_path = Path(cache_env).expanduser() if cache_env else None
         return cls(
             user_agent=settings.EDGAR_USER_AGENT,
             sleep_seconds=settings.EDGAR_REQUEST_SLEEP_SECONDS,
             timeout_seconds=settings.EDGAR_REQUEST_TIMEOUT_SECONDS,
             max_retries=settings.EDGAR_MAX_RETRIES,
             backoff_base=settings.EDGAR_BACKOFF_BASE,
-            cache_dir=cache_path,
+            cache_dir=None,  # MVP: No caching - all requests live
         )
 
 
@@ -193,12 +194,14 @@ class EdgarClient:
         return [row for row in reader]
 
     def _request_json(self, url: str) -> Any:
-        cached = self._load_from_cache(url)
-        if cached is not None:
-            return cached
+        # MVP: Skip caching - always fetch live
+        # cached = self._load_from_cache(url)
+        # if cached is not None:
+        #     return cached
         response = self._request(url)
         payload = response.json()
-        self._write_cache(url, payload)
+        # MVP: Skip cache write
+        # self._write_cache(url, payload)
         return payload
 
     def _request(self, url: str) -> requests.Response:
