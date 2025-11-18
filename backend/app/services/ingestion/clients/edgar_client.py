@@ -1,25 +1,17 @@
 """
 edgar_client.py — HTTP client for SEC EDGAR data endpoints.
 
-Responsibilities
-----------------
-- Centralize polite HTTP communication with the SEC JSON endpoints.
-- Provide convenience methods used by ingestion adapters/pipelines:
-    * S&P 500 constituents (via configurable source)
-    * Ticker → CIK mapping (`company_tickers.json`)
-    * Submissions feed per company (`submissions/CIK##########.json`)
-    * Company facts dataset (`api/xbrl/companyfacts/CIK##########.json`)
-- Encapsulate retry behaviour, rate limiting, and optional on-disk caching.
-
-This module should stay stateless beyond basic caching so that it can be
-shared safely across async/background tasks.
+MVP Responsibilities:
+- Direct HTTP communication with SEC JSON endpoints (no caching)
+- Fetch Company Facts, Submissions, and Ticker mappings
+- Polite rate limiting and retry behavior
+- Stateless - safe for concurrent use
 """
 
 from __future__ import annotations
 
 import csv
 import json
-import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,24 +48,23 @@ class EdgarClientConfigurationError(EdgarClientError):
 
 @dataclass(frozen=True)
 class EdgarClientSettings:
+    """
+    MVP EdgarClient settings - no caching, direct fetch only.
+    """
     user_agent: str
     sleep_seconds: float
     timeout_seconds: int
     max_retries: int
     backoff_base: float
-    cache_dir: Optional[Path] = None
 
     @classmethod
     def from_app_settings(cls) -> "EdgarClientSettings":
-        cache_env = os.getenv("EDGAR_CACHE_DIR")
-        cache_path = Path(cache_env).expanduser() if cache_env else None
         return cls(
             user_agent=settings.EDGAR_USER_AGENT,
             sleep_seconds=settings.EDGAR_REQUEST_SLEEP_SECONDS,
             timeout_seconds=settings.EDGAR_REQUEST_TIMEOUT_SECONDS,
             max_retries=settings.EDGAR_MAX_RETRIES,
             backoff_base=settings.EDGAR_BACKOFF_BASE,
-            cache_dir=cache_path,
         )
 
 
@@ -89,9 +80,6 @@ class EdgarClient:
         self._session = session or requests.Session()
         self._config = config or EdgarClientSettings.from_app_settings()
         self._session.headers.update({**SEC_BASE_HEADERS, "User-Agent": self._config.user_agent})
-
-        if self._config.cache_dir:
-            self._config.cache_dir.mkdir(parents=True, exist_ok=True)
 
     # --------------------------------------------------------------------- #
     # Public API
@@ -149,31 +137,6 @@ class EdgarClient:
     # ------------------------------------------------------------------ #
     # Request helpers
     # ------------------------------------------------------------------ #
-    def _cache_path_for(self, url: str) -> Optional[Path]:
-        if not self._config.cache_dir:
-            return None
-        safe = url.replace("https://", "").replace("/", "_")
-        return self._config.cache_dir / f"{safe}.json"
-
-    def _load_from_cache(self, url: str) -> Optional[Any]:
-        cache_path = self._cache_path_for(url)
-        if cache_path and cache_path.exists():
-            try:
-                with cache_path.open("r", encoding="utf-8") as fh:
-                    return json.load(fh)
-            except json.JSONDecodeError:
-                logger.warning("Failed to decode cached response for %s; ignoring cache.", url)
-        return None
-
-    def _write_cache(self, url: str, payload: Any) -> None:
-        cache_path = self._cache_path_for(url)
-        if not cache_path:
-            return
-        try:
-            with cache_path.open("w", encoding="utf-8") as fh:
-                json.dump(payload, fh)
-        except OSError as exc:
-            logger.warning("Unable to write EDGAR cache file %s: %s", cache_path, exc)
 
     def _request_json_or_csv(self, url: str) -> Any:
         if url.lower().endswith(".json"):
@@ -193,13 +156,9 @@ class EdgarClient:
         return [row for row in reader]
 
     def _request_json(self, url: str) -> Any:
-        cached = self._load_from_cache(url)
-        if cached is not None:
-            return cached
+        """Fetch JSON from URL - MVP: no caching, direct fetch only."""
         response = self._request(url)
-        payload = response.json()
-        self._write_cache(url, payload)
-        return payload
+        return response.json()
 
     def _request(self, url: str) -> requests.Response:
         response = self._perform_request(url)
