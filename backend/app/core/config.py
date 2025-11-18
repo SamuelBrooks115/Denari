@@ -4,18 +4,19 @@ config.py — Centralized Application Configuration Loader
 Purpose:
 - Define a single source of truth for application settings.
 - Load and validate environment variables from `.env` or OS environment.
-- Make configuration accessible across:
-    * database.py
-    * ingestion adapters (Yahoo / EDGAR API keys)
-- Prevent "magic strings" scattered across code.
+- MVP: Minimal configuration for EDGAR data fetching and model population.
 
 MVP Requirements:
-- Must load:
-    SUPABASE_DB_URL
-    SUPABASE_URL
-    SUPABASE_SERVICE_ROLE_KEY
-    EDGAR_USER_AGENT
-- Should not fail silently — fail fast if critical config missing.
+- EDGAR API settings for data fetching
+- No database - models are populated directly from JSON
+- No caching - direct fetch and process workflow
+
+Core Workflow:
+1. Pull from EDGAR → JSON
+2. Use JSON to populate 3 models:
+   - 3-Statement Model
+   - DCF Model
+   - Comps Model
 
 This module does NOT:
 - Execute any DB connections.
@@ -23,27 +24,20 @@ This module does NOT:
 - Modify runtime settings.
 """
 
-import os
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """
-    Settings container loaded once at app startup.
-
-    Notes:
-    - `env_file` ensures `.env` is used during local dev.
-    - Rename variables to match actual deployment environment names.
+    MVP Settings container - minimal viable product configuration.
+    
+    Core workflow:
+    1. Pull from EDGAR → JSON
+    2. Use JSON to populate 3 models (3-statement, DCF, Comps)
+    3. No database persistence - models are in-memory only
     """
-    # Database
-    SUPABASE_DB_URL: str = Field(..., description="Postgres connection string provided by Supabase")
-    SUPABASE_URL: str = Field(..., description="Supabase project URL for API client")
-    SUPABASE_SERVICE_ROLE_KEY: str = Field(..., description="Supabase service role key for backend ingestion")
-
-    # External APIs (MVP: Yahoo Finance - no key required) 
-
-    # Ingestion / EDGAR
+    # EDGAR API - Required for data fetching
     EDGAR_USER_AGENT: str = Field(
         "Denari/1.0 (contact: ingestion@denari.ai)",
         description="SEC-compliant User-Agent string for EDGAR requests",
@@ -64,13 +58,6 @@ class Settings(BaseSettings):
         0.6,
         description="Exponential backoff base for retry delays",
     )
-    SP500_TICKER_SOURCE: str = Field(
-        "",
-        description="Optional path or URL to cached S&P 500 constituents CSV/JSON",
-    )
-
-    # Optional future config
-    ENV: str = Field("development", description="'development' | 'production' environment flag")
 
     model_config = SettingsConfigDict(
         env_file=".env",
