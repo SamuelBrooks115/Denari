@@ -17,6 +17,7 @@ from typing import Optional
 
 from app.core.logging import get_logger
 from app.services.ingestion.clients import EdgarClient
+from app.services.ingestion.structured_output import (
     extract_single_year_structured,
     extract_multi_year_structured,
 )
