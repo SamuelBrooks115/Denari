@@ -24,8 +24,25 @@ This module does NOT:
 - Modify runtime settings.
 """
 
-from pydantic import Field
+from pathlib import Path
+from typing import Any
+
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Find .env file relative to backend directory
+# config.py is at: backend/app/core/config.py
+# .env should be at: backend/.env
+_CONFIG_DIR = Path(__file__).parent  # backend/app/core
+_BACKEND_DIR = _CONFIG_DIR.parent.parent  # backend
+_ENV_FILE = _BACKEND_DIR / ".env"
+
+# Use absolute path for reliability
+if _ENV_FILE.exists():
+    _ENV_FILE_PATH = str(_ENV_FILE.resolve())
+else:
+    # Fallback: use relative path (pydantic will look in CWD)
+    _ENV_FILE_PATH = ".env"
 
 
 class Settings(BaseSettings):
@@ -59,8 +76,42 @@ class Settings(BaseSettings):
         description="Exponential backoff base for retry delays",
     )
 
+    # LLM API - For classifying EDGAR facts
+    LLM_ENABLED: bool = Field(
+        True,
+        description="Enable LLM classification (set False to disable for testing)",
+    )
+    LLM_PROVIDER: str = Field(
+        "openai",
+        description="LLM provider: 'openai' or 'anthropic'",
+    )
+    OPENAI_API_KEY: str = Field(
+        "",
+        description="OpenAI API key for LLM classification (optional, can be empty if LLM_ENABLED=False)",
+    )
+    
+    @field_validator('OPENAI_API_KEY', mode='before')
+    @classmethod
+    def strip_api_key(cls, v: Any) -> str:
+        """Strip whitespace from API key."""
+        if isinstance(v, str):
+            return v.strip()
+        return v or ""
+    OPENAI_MODEL: str = Field(
+        "gpt-4o-mini",
+        description="OpenAI model to use for classification",
+    )
+    LLM_TIMEOUT_SECONDS: int = Field(
+        30,
+        description="Timeout for LLM API calls (seconds)",
+    )
+    LLM_MAX_RETRIES: int = Field(
+        3,
+        description="Maximum retry attempts for LLM API calls",
+    )
+
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_ENV_FILE_PATH,
         env_file_encoding="utf-8",
         extra="ignore",
     )

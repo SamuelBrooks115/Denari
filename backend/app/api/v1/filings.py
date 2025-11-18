@@ -9,7 +9,7 @@ Purpose:
 
 Key Interactions:
 - app.services.ingestion.edgar_adapter → fetches raw filings from SEC/third-party APIs.
-- app.services.ingestion.normalize_xbrl → converts raw XBRL → standardized GAAP fact/value rows.
+- app.services.ingestion.xbrl.normalizer → converts raw XBRL → standardized GAAP fact/value rows.
 - app.services.ingestion.ingest_orchestrator → coordinates "if missing → fetch → normalize → upsert".
 - app.models.filing → ORM model representing metadata about a filing.
 - app.models.xbrl_fact → ORM model representing individual financial facts extracted per tag & period.
