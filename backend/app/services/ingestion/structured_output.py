@@ -894,15 +894,15 @@ REQUIRED_MODEL_ITEMS = [
 
 def extract_available_labels(edgar_json: Dict[str, Any]) -> List[Dict[str, str]]:
     """
-    Extract all available EDGAR labels with their tags and statement types.
+    Extract all available EDGAR labels with their tags, statement types, and units.
     
     Args:
         edgar_json: The structured EDGAR JSON with statements
         
     Returns:
-        List of dictionaries with label, tag, and statement:
+        List of dictionaries with label, tag, statement, and unit:
         [
-            {"label": "...", "tag": "...", "statement": "income_statement"},
+            {"label": "...", "tag": "...", "statement": "income_statement", "unit": "USD"},
             ...
         ]
     """
@@ -922,6 +922,7 @@ def extract_available_labels(edgar_json: Dict[str, Any]) -> List[Dict[str, str]]
         for item in line_items:
             label = item.get("label", "")
             tag = item.get("tag", "")
+            unit = item.get("unit", "")
             if label and tag:
                 # Avoid duplicates by checking if label+tag combo already exists
                 if not any(l["label"] == label and l["tag"] == tag for l in labels):
@@ -929,16 +930,155 @@ def extract_available_labels(edgar_json: Dict[str, Any]) -> List[Dict[str, str]]
                         "label": label,
                         "tag": tag,
                         "statement": statement_type,
+                        "unit": unit,
                     })
     
     return labels
 
 
-def _validate_match(required_item: str, matched_tag: str, matched_label: str) -> Optional[str]:
+def _is_pretax_income_concept(tag: str, label: str) -> bool:
     """
-    Validate that an LLM match makes semantic sense.
+    Detect income concepts that occur BEFORE tax deduction.
     
-    Returns error message if validation fails, None if valid.
+    Args:
+        tag: EDGAR tag (e.g., "IncomeLossFromContinuingOperationsBeforeIncomeTaxes")
+        label: EDGAR label (e.g., "Income (Loss) from Continuing Operations before Income Taxes")
+        
+    Returns:
+        True if semantic meaning indicates pre-tax income
+    """
+    tag_lower = tag.lower()
+    label_lower = label.lower()
+    
+    # Check for "before" AND ("tax" OR "income tax")
+    if "before" in tag_lower or "before" in label_lower:
+        if "tax" in tag_lower or "tax" in label_lower:
+            return True
+    
+    # Check for explicit pre-tax indicators
+    if "pretax" in tag_lower or "pre-tax" in tag_lower or "pretax" in label_lower or "pre-tax" in label_lower:
+        return True
+    
+    # Check for "earnings before tax" or "income before tax"
+    if ("earnings" in tag_lower or "earnings" in label_lower) and "before" in tag_lower or "before" in label_lower:
+        if "tax" in tag_lower or "tax" in label_lower:
+            return True
+    
+    return False
+
+
+def _is_tax_expense_concept(tag: str, label: str) -> bool:
+    """
+    Detect actual tax expense/benefit dollar amounts.
+    
+    Args:
+        tag: EDGAR tag (e.g., "IncomeTaxExpenseBenefit")
+        label: EDGAR label (e.g., "Income Tax Expense (Benefit)")
+        
+    Returns:
+        True if semantic meaning indicates tax expense
+    """
+    tag_lower = tag.lower()
+    label_lower = label.lower()
+    
+    # Must contain "tax" AND ("expense" OR "benefit")
+    has_tax = "tax" in tag_lower or "tax" in label_lower
+    has_expense_or_benefit = ("expense" in tag_lower or "expense" in label_lower or 
+                              "benefit" in tag_lower or "benefit" in label_lower)
+    
+    if not (has_tax and has_expense_or_benefit):
+        return False
+    
+    # Must NOT contain "rate" or "percent" or "%" (those are parameters, not expenses)
+    if any(indicator in tag_lower or indicator in label_lower 
+           for indicator in ["rate", "percent", "%"]):
+        return False
+    
+    # Must NOT contain "before" (to exclude pre-tax income)
+    if "before" in tag_lower or "before" in label_lower:
+        return False
+    
+    return True
+
+
+def _is_tax_rate_parameter(tag: str, label: str, unit: str) -> bool:
+    """
+    Detect tax rate parameters (percentages).
+    
+    Args:
+        tag: EDGAR tag (e.g., "EffectiveIncomeTaxRateReconciliationAtFederalStatutoryIncomeTaxRate")
+        label: EDGAR label (e.g., "Effective Income Tax Rate Reconciliation, at Federal Statutory Income Tax Rate, Percent")
+        unit: Unit of measurement (e.g., "pure" for percentages)
+        
+    Returns:
+        True if semantic meaning indicates a rate parameter
+    """
+    tag_lower = tag.lower()
+    label_lower = label.lower()
+    
+    # Check if unit is "pure" (percentage) AND contains rate indicators
+    if unit == "pure":
+        if any(indicator in tag_lower or indicator in label_lower 
+               for indicator in ["rate", "percent", "%"]):
+            return True
+    
+    # Check for explicit tax rate patterns
+    if any(pattern in tag_lower or pattern in label_lower 
+           for pattern in ["tax rate", "effective tax rate", "statutory tax rate"]):
+        return True
+    
+    return False
+
+
+def _is_flow_concept(statement_type: str) -> bool:
+    """
+    Determine if statement type represents flows (cash flow) vs stocks (balance sheet).
+    
+    Args:
+        statement_type: Statement type string
+        
+    Returns:
+        True only for "cash_flow_statement"
+    """
+    return statement_type == "cash_flow_statement"
+
+
+def _get_expected_statement_type(model_role: str) -> str:
+    """
+    Map model role prefix to expected statement type.
+    
+    Args:
+        model_role: Model role string (e.g., "IS_REVENUE", "BS_CASH", "CF_DIVIDENDS_PAID")
+        
+    Returns:
+        Expected statement type ("income_statement", "balance_sheet", "cash_flow_statement") or empty string
+    """
+    if not model_role:
+        return ""
+    
+    if model_role.startswith("IS_"):
+        return "income_statement"
+    elif model_role.startswith("BS_"):
+        return "balance_sheet"
+    elif model_role.startswith("CF_"):
+        return "cash_flow_statement"
+    
+    return ""
+
+
+def _validate_match(required_item: str, matched_tag: str, matched_label: str, statement_type: str = "", unit: str = "") -> Optional[str]:
+    """
+    Validate that an LLM match makes semantic sense using modular semantic pattern detection.
+    
+    Args:
+        required_item: The required modeling item being matched
+        matched_tag: The EDGAR tag that was matched
+        matched_label: The EDGAR label that was matched
+        statement_type: The statement type (income_statement, balance_sheet, cash_flow_statement)
+        unit: The unit of measurement (e.g., "USD", "pure")
+        
+    Returns:
+        Error message if validation fails, None if valid.
     """
     tag_lower = matched_tag.lower()
     label_lower = matched_label.lower()
@@ -967,10 +1107,41 @@ def _validate_match(required_item: str, matched_tag: str, matched_label: str) ->
     if "net margin" in tag_lower or "net margin" in label_lower:
         return "Net Margin is computed (Net Income / Revenue) - tag raw accounts instead"
     
-    # Reject tax rate (we only tag tax expense)
-    if "tax rate" in tag_lower or "tax rate" in label_lower or ("tax" in tag_lower and "rate" in tag_lower):
-        if "expense" not in tag_lower and "expense" not in label_lower:
-            return "Tax Rate is computed (Tax Expense / Pre-Tax Income) - tag Tax Expense instead"
+    # Pre-tax Income Prevention (Modular Semantic)
+    if _is_pretax_income_concept(matched_tag, matched_label):
+        if required_item == "Tax Expense":
+            return "Pre-tax income concept cannot be tagged as tax expense"
+    
+    # Tax Expense Validation (Modular Semantic)
+    if required_item == "Tax Expense":
+        # Must pass tax expense concept check
+        if not _is_tax_expense_concept(matched_tag, matched_label):
+            return "Tax Expense must match actual tax expense/benefit dollar amounts, not pre-tax income or tax rate parameters"
+        
+        # Must NOT be pre-tax income
+        if _is_pretax_income_concept(matched_tag, matched_label):
+            return "Pre-tax income concept cannot be tagged as tax expense"
+        
+        # Must NOT be tax rate parameter
+        if _is_tax_rate_parameter(matched_tag, matched_label, unit):
+            return "Tax rate parameter cannot be tagged as tax expense"
+    
+    # Tax Rate Parameter Prevention (Modular Semantic)
+    if _is_tax_rate_parameter(matched_tag, matched_label, unit):
+        if required_item == "Tax Expense":
+            return "Tax rate parameter cannot be tagged as tax expense"
+    
+    # Share Repurchases Prevention (Modular Semantic)
+    if required_item == "Share Repurchases":
+        if not _is_flow_concept(statement_type):
+            return "Share repurchases must come from cash flow statement (flows), not balance sheet (stocks)"
+    
+    # Statement-Type Mismatch Prevention (Modular Semantic)
+    model_role = model_role_for(required_item)
+    if model_role:
+        expected_stmt = _get_expected_statement_type(model_role)
+        if expected_stmt and statement_type and statement_type != expected_stmt:
+            return f"Model role {model_role} cannot be applied to {statement_type} items (expected {expected_stmt})"
     
     # Revenue should NOT be operating income, EBITDA, or margins
     if required_item == "Revenue":
@@ -998,11 +1169,6 @@ def _validate_match(required_item: str, matched_tag: str, matched_label: str) ->
             return "Gross Costs matched to Gross Profit - Gross Costs is COGS, Gross Profit is Revenue minus COGS"
         if "grossmargin" in tag_lower or "grossmargin" in label_lower:
             return "Gross Costs matched to Gross Margin - Gross Margin is computed, tag COGS instead"
-    
-    # Tax Expense should NOT be tax rate
-    if required_item == "Tax Expense":
-        if "tax rate" in tag_lower or "tax rate" in label_lower:
-            return "Tax Expense matched to Tax Rate - Tax Rate is computed (Tax Expense / Pre-Tax Income), tag Tax Expense instead"
     
     return None  # Validation passed
 
@@ -1059,8 +1225,9 @@ def _try_exact_match(required_item: str, available_labels: List[Dict[str, str]])
             "accruedexpensesandothercurrentliabilities"
         ],
         "share repurchases": [
+            # Only cash-flow specific patterns - treasury stock is a balance sheet item, not a flow
             "paymentsforrepurchaseofcommonstock", "paymentsforrepurchaseofequity",
-            "treasurystock", "stockrepurchases", "paymentsforrepurchase"
+            "stockrepurchases", "paymentsforrepurchase", "repurchaseofequity"
         ],
         "debt amount": [
             "debtcurrent", "longtermdebtcurrent", "shorttermdebt",
@@ -1078,11 +1245,30 @@ def _try_exact_match(required_item: str, available_labels: List[Dict[str, str]])
     # Special handling for items that should avoid combined tags
     avoid_combined_tags = required_lower in ["accounts payable", "accrued expenses"]
     
+    # Early rejection using semantic functions
+    # For Share Repurchases: must be from cash flow statement
+    if required_lower == "share repurchases":
+        # Filter to only cash flow statement items
+        available_labels = [l for l in available_labels if l.get("statement") == "cash_flow_statement"]
+        if not available_labels:
+            return None  # No cash flow items available
+    
     # Collect all matches first
     matches = []
     for label_dict in available_labels:
         tag_lower = label_dict["tag"].lower()
         label_lower = label_dict["label"].lower()
+        statement_type = label_dict.get("statement", "")
+        unit = label_dict.get("unit", "")
+        
+        # Early rejection for Tax Expense using semantic functions
+        if required_lower == "tax expense":
+            # Reject tax rate parameters
+            if _is_tax_rate_parameter(label_dict["tag"], label_dict["label"], unit):
+                continue
+            # Reject pre-tax income concepts
+            if _is_pretax_income_concept(label_dict["tag"], label_dict["label"]):
+                continue
         
         # Check against expected patterns
         for pattern in patterns:
@@ -1173,9 +1359,10 @@ def match_required_item_to_label(required_item: str, available_labels: List[Dict
     if exact_match:
         return exact_match
     
-    # Format labels for prompt
+    # Format labels for prompt (include statement and unit)
     labels_text = "\n".join(
-        f"- {label['label']} → {label['tag']}" for label in available_labels
+        f"- {label['label']} → {label['tag']} → {label.get('statement', 'unknown')} → {label.get('unit', 'unknown')}"
+        for label in available_labels
     )
     
     # Define what each required item means (to help LLM make better matches)
@@ -1184,13 +1371,13 @@ def match_required_item_to_label(required_item: str, available_labels: List[Dict
         "Revenue": "Total revenue/sales - the top line of the income statement. Raw GAAP account. NOT operating income, NOT EBITDA, NOT any margin.",
         "Operating Costs": "TOTAL operating expenses - the sum of COGS, SG&A, R&D, and all other operating expenses. Look for tags like 'TotalOperatingExpenses' or 'OperatingExpenses'. DO NOT match individual components like COGS or SG&A - those are separate line items. Raw GAAP account. NOT a margin or ratio.",
         "Gross Costs": "Cost of goods sold (COGS) ONLY - direct costs of producing goods/services. Look for tags like 'CostOfGoodsAndServicesSold' or 'CostOfRevenue'. This is a component of Operating Costs, but should be matched separately. Raw GAAP account. NOT gross margin or gross profit.",
-        "Tax Expense": "Income tax expense - the actual tax paid on income. Raw GAAP account. NOT tax rate (which is computed as Tax Expense / Pre-Tax Income).",
+        "Tax Expense": "Income tax expense (benefit) - actual dollar amount of taxes paid/accrued (unit='USD'). Semantic meaning: The tax amount itself, not income before taxes, not tax rates/percentages. DO NOT match to pre-tax income concepts or tax rate parameters.",
         "PP&E": "Property, Plant and Equipment (net) - long-term tangible assets. Raw GAAP account on balance sheet.",
         "Inventory": "Inventory - goods held for sale. Raw GAAP account - current asset on balance sheet.",
         "Accounts Payable": "Accounts Payable ONLY - money owed to suppliers. Prefer separate 'AccountsPayable' or 'AccountsPayableCurrent' tags. AVOID combined tags like 'AccountsPayableAndAccruedLiabilities' unless no separate tag exists. Raw GAAP account - current liability on balance sheet.",
         "Accounts Receivable": "Accounts Receivable - money owed by customers. Raw GAAP account - current asset on balance sheet.",
         "Accrued Expenses": "Accrued Liabilities ONLY - expenses incurred but not yet paid. Prefer separate 'AccruedLiabilitiesCurrent' or 'AccruedExpenses' tags. AVOID combined tags like 'AccountsPayableAndAccruedLiabilities' unless no separate tag exists. Raw GAAP account - current liability.",
-        "Share Repurchases": "Payments for repurchase of common stock or treasury stock. Raw GAAP account - cash flow item.",
+        "Share Repurchases": "Payments for repurchase of common stock or treasury stock. Raw GAAP account - cash flow item. Match only cash flow statement items (flows). DO NOT match balance sheet equity balances (stocks).",
         "Debt Amount": "Debt issuances, repayments, or balance sheet debt. Raw GAAP account. NOT a debt ratio.",
         "Dividend Payout": "Dividends paid to shareholders - raw cash outflow. Raw GAAP account - cash flow item. NOT dividend payout ratio (which is computed as Dividends Paid / Net Income).",
     }
@@ -1203,7 +1390,7 @@ def match_required_item_to_label(required_item: str, available_labels: List[Dict
 REQUIRED MODEL ITEM: {required_item}
 {item_definition}
 
-AVAILABLE EDGAR LABELS (label → tag):
+AVAILABLE EDGAR LABELS (label → tag → statement → unit):
 {labels_text}
 
 Return ONLY a JSON object with:
@@ -1222,7 +1409,9 @@ CRITICAL RULES:
 - For Gross Costs: Match cost of goods sold (COGS) specifically - look for "CostOfGoodsAndServicesSold" or "CostOfRevenue". This is separate from Operating Costs.
 - For Accounts Payable: Prefer separate "AccountsPayable" or "AccountsPayableCurrent" tags. AVOID combined tags like "AccountsPayableAndAccruedLiabilities" unless no separate tag exists.
 - For Accrued Expenses: Prefer separate "AccruedLiabilitiesCurrent" or "AccruedExpenses" tags. AVOID combined tags like "AccountsPayableAndAccruedLiabilities" unless no separate tag exists.
-- For Tax Expense: Match the actual tax expense amount, NOT tax rate (tax rate is computed downstream).
+- For Tax Expense: Match only actual tax expense/benefit dollar amounts (unit='USD'). Do NOT match pre-tax income concepts or tax rate parameters.
+- For Share Repurchases: Match only cash flow statement items (flows). Do NOT match balance sheet equity balances (stocks).
+- Match roles to correct statement types: IS_* → income statement, BS_* → balance sheet, CF_* → cash flow.
 - NEVER match EBITDA, EBITDA margin, operating margin, gross margin, net margin, or any ratio.
 - Prefer the most aggregated or standard label if multiple exist, BUT avoid combined tags when separate tags exist.
 - Do NOT return arrays, lists, alternatives, or commentary."""
@@ -1254,7 +1443,17 @@ CRITICAL RULES:
         
         # Validate the match makes semantic sense
         if matched_tag:
-            validation_error = _validate_match(required_item, matched_tag, matched_label)
+            # Find the matched label dict to get statement_type and unit
+            matched_label_dict = None
+            for label_dict in available_labels:
+                if label_dict.get("tag") == matched_tag:
+                    matched_label_dict = label_dict
+                    break
+            
+            statement_type = matched_label_dict.get("statement", "") if matched_label_dict else ""
+            unit = matched_label_dict.get("unit", "") if matched_label_dict else ""
+            
+            validation_error = _validate_match(required_item, matched_tag, matched_label, statement_type, unit)
             if validation_error:
                 logger.warning(
                     f"LLM match validation failed for '{required_item}': {validation_error}. "
@@ -1473,6 +1672,15 @@ def apply_mapping(edgar_json: Dict[str, Any], mapping: Dict[str, str]) -> Dict[s
                 
                 if not model_role:
                     logger.warning(f"No model_role mapping for required item: {required_item}")
+                    continue
+                
+                # Statement-type validation guardrails
+                expected_stmt = _get_expected_statement_type(model_role)
+                if expected_stmt and stmt_key != expected_stmt:
+                    logger.warning(
+                        f"Skipping {model_role} on {stmt_key} - role must be on {expected_stmt}. "
+                        f"Tag: {tag}, Required item: {required_item}"
+                    )
                     continue
                 
                 # Get flags from model_role_map
