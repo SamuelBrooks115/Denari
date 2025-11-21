@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download, RefreshCw, Settings, TrendingUp, FileSpreadsheet } from "lucide-react";
 import { useState } from "react";
+import { downloadExcelFromTemplate } from "@/lib/downloadExcel";
 
 export default function ModelPage() {
   const [period, setPeriod] = useState("annual");
@@ -53,6 +54,130 @@ export default function ModelPage() {
     }).format(num);
   };
 
+  const handleExport = async () => {
+    try {
+      // Extract numeric values from valuation data
+      const enterpriseValue = parseFloat(valuationData[0].value.replace('M', '')) * 1000000; // Convert "425M" to 425000000
+      const equityValue = parseFloat(valuationData[1].value.replace('M', '')) * 1000000; // Convert "388M" to 388000000
+      const dcfValuePerShare = parseFloat(valuationData[2].value.replace('$', '')); // Extract 42.50 from "$42.50"
+      
+      // Calculate Net Debt (Enterprise Value - Equity Value)
+      const netDebt = enterpriseValue - equityValue;
+      
+      // Calculate shares outstanding (Equity Value / Price per share, or use a reasonable estimate)
+      // For now, we'll use a placeholder - you may want to add this as actual data
+      const estimatedSharePrice = 150; // Placeholder - adjust based on actual data
+      const sharesOutstanding = Math.round(equityValue / estimatedSharePrice);
+      
+      // Map data to DCF template structure
+      // NOTE: Cell references are estimates based on typical DCF template layout
+      // You MUST verify and adjust these by opening DCF_A_Template.xlsx in Excel
+      const dataMap: Record<string, any> = {
+        // ===== HEADER SECTION =====
+        'B2': 'Apple Inc.',  // Company Name in header (adjust if different)
+        
+        // ===== OTHER ASSUMPTIONS SECTION (Top Right) =====
+        // These are typical locations - adjust based on your template
+        //'J2': 'Apple Inc.',  // Company Name
+        'J2': 'AAPL',        // Ticker Symbol
+        'J5': new Date('2025-12-31'), // Fiscal Year End (12/31/2025)
+        //'J5': 0.02,          // LTGR (Long-Term Growth Rate) - 2.00% as decimal
+        'J6': balanceSheetData[0].fy2024,  // Cash & Equivalents (most recent year)
+        'J7': sharesOutstanding,  // Diluted Shares Outstanding
+        'J8': estimatedSharePrice,  // Current Price (placeholder - adjust)
+        'J9': equityValue,   // Market Cap (Equity Value)
+        'J10': netDebt,      // BV debt (Net Debt)
+        
+        // ===== FREE CASH FLOW SECTION - HISTORICAL DATA (Year'A' columns) =====
+        // Revenue row - Historical years (typically columns C, D, E, F, G for 5 years)
+        'D17': incomeStatementData[0].fy2022,  // Revenue Year'A'1 (FY2022)
+        'E17': incomeStatementData[0].fy2023, // Revenue Year'A'2 (FY2023)
+        'F17': incomeStatementData[0].fy2024,  // Revenue Year'A'3 (FY2024)
+        // Add more years if you have data for Year'A'4 and Year'A'5
+        
+        // (-) COGS row
+        'D20': Math.abs(incomeStatementData[1].fy2022),  // COGS Year'A'1 (make positive)
+        'E20': Math.abs(incomeStatementData[1].fy2023), // COGS Year'A'2
+        'F20': Math.abs(incomeStatementData[1].fy2024), // COGS Year'A'3
+        
+        // Gross Profit (calculated in template, but can set if needed)
+        // 'C12': incomeStatementData[2].fy2022,  // GP Year'A'1
+        
+        // (-) Operating Expenses row
+        'D23': Math.abs(incomeStatementData[3].fy2022),  // Op Ex Year'A'1 (make positive)
+        'E23': Math.abs(incomeStatementData[3].fy2023),  // Op Ex Year'A'2
+        'F23': Math.abs(incomeStatementData[3].fy2024),  // Op Ex Year'A'3
+        
+        // EBIT (calculated in template, but can set if needed)
+        // EBITDA can be used as proxy for EBIT if D&A is small
+        'C15': incomeStatementData[4].fy2022,  // EBIT Year'A'1 (using EBITDA as proxy)
+        'D15': incomeStatementData[4].fy2023,  // EBIT Year'A'2
+        'E15': incomeStatementData[4].fy2024,  // EBIT Year'A'3
+        
+        // NOPAT (Net Operating Profit After Tax) - using Net Income as proxy
+        // 'C17': incomeStatementData[5].fy2022,  // NOPAT Year'A'1 (using Net Income)
+        // 'D17': incomeStatementData[5].fy2023,  // NOPAT Year'A'2
+        // 'E17': incomeStatementData[5].fy2024,  // NOPAT Year'A'3
+        
+        // (+) D&A (Depreciation & Amortization) - estimate from EBITDA - EBIT
+        // Since we don't have D&A separately, we'll use a placeholder or calculate
+        // D&A = EBITDA - EBIT, but we're using EBITDA as EBIT proxy, so D&A ≈ 0
+        // You may want to add actual D&A data
+        'D28': 0,  // D&A Year'A'1 (placeholder - add actual data)
+        'E28': 0,  // D&A Year'A'2
+        'F28': 0,  // D&A Year'A'3
+        
+        // (-) CapEx (Capital Expenditures) - using Investing Cash Flow as proxy
+        'D29': Math.abs(cashFlowData[1].fy2022),  // CapEx Year'A'1 (Investing CF, make positive)
+        'E29': Math.abs(cashFlowData[1].fy2023), // CapEx Year'A'2
+        'F29': Math.abs(cashFlowData[1].fy2024), // CapEx Year'A'3
+        
+        // (-) Changes in WC (Working Capital) - calculate from balance sheet changes
+        // WC Change = (Current Assets - Current Liabilities) change year-over-year
+        // Simplified: using a placeholder - you may want to calculate this properly
+        'D30': 0,  // Changes in WC Year'A'1 (placeholder - calculate from BS data)
+        'E30': 0,  // Changes in WC Year'A'2
+        'F30': 0,  // Changes in WC Year'A'3
+        
+        // Unlevered Free Cash Flow (calculated in template, but can set if available)
+        'C21': cashFlowData[0].fy2022,  // UFCF Year'A'1 (using Operating CF as proxy)
+        'D21': cashFlowData[0].fy2023,  // UFCF Year'A'2
+        'E21': cashFlowData[0].fy2024,  // UFCF Year'A'3
+        
+        // ===== DCF SECTION =====
+        // These are typically calculated by the template, but we can set if needed
+        // Discount Period, Discount Factor, PV of UFCF are usually formulas
+        
+        // ===== TERMINAL VALUE SECTION =====
+        // Terminal Value is typically calculated by the template
+        
+        // ===== ENTERPRISE VALUE SECTION =====
+        // 'C30': enterpriseValue,  // Enterprise Value (adjust cell reference)
+        
+        // // (-) Net Debt
+        // 'C31': netDebt,  // Net Debt (adjust cell reference)
+        
+        // // Equity Value
+        // 'C32': equityValue,  // Equity Value (adjust cell reference)
+        
+        // // ===== PER SHARE PRICE TARGET SECTION =====
+        // 'C35': sharesOutstanding,  // Shares Outstanding (adjust cell reference)
+        // 'C36': dcfValuePerShare,   // Per Share Price Target (adjust cell reference)
+        
+        // // Implied Upside/Downside (calculated in template)
+      };
+
+      await downloadExcelFromTemplate(
+        '/Templates/DCF_A_Template.xlsx',
+        dataMap,
+        'model-export'
+      );
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert('Failed to export Excel file. Please check the console for details.');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-8">
@@ -91,7 +216,11 @@ export default function ModelPage() {
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Refresh
               </Button>
-              <Button size="sm" className="bg-denari-3 hover:bg-denari-3/90">
+              <Button 
+                size="sm" 
+                className="bg-denari-3 hover:bg-denari-3/90"
+                onClick={handleExport}
+              >
                 <Download className="h-4 w-4 mr-2" />
                 Export
               </Button>
