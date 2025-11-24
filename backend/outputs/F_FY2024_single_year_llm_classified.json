@@ -1,0 +1,705 @@
+{
+  "company": "Ford Motor Co",
+  "ticker": "F",
+  "periods": [
+    "2024-12-31"
+  ],
+  "statements": {
+    "income_statement": {
+      "line_items": [
+        {
+          "tag": "Revenues",
+          "label": "Revenues",
+          "model_role": "IS_REVENUE",
+          "is_core_3_statement": true,
+          "is_dcf_key": true,
+          "is_comps_key": true,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 184992000000.0
+          },
+          "supporting_tags": [
+            "Revenues"
+          ],
+          "llm_classification": {
+            "best_fit_role": "IS_REVENUE",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "CostOfGoodsAndServicesSold",
+          "label": "Cost of Goods and Services Sold",
+          "model_role": "IS_COGS",
+          "is_core_3_statement": true,
+          "is_dcf_key": true,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 158434000000.0
+          },
+          "supporting_tags": [
+            "CostOfGoodsAndServicesSold"
+          ],
+          "llm_classification": {
+            "best_fit_role": "IS_COGS",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "OperatingIncomeLoss",
+          "label": "Operating Income (Loss)",
+          "model_role": "IS_OPERATING_INCOME",
+          "is_core_3_statement": true,
+          "is_dcf_key": true,
+          "is_comps_key": true,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 5219000000.0
+          },
+          "supporting_tags": [
+            "OperatingIncomeLoss"
+          ],
+          "llm_classification": {
+            "best_fit_role": "IS_OPERATING_INCOME",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "IncomeTaxExpenseBenefit",
+          "label": "Income Tax Expense (Benefit)",
+          "model_role": "IS_TAX_EXPENSE",
+          "is_core_3_statement": true,
+          "is_dcf_key": true,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 1339000000.0
+          },
+          "supporting_tags": [
+            "IncomeTaxExpenseBenefit"
+          ],
+          "llm_classification": {
+            "best_fit_role": "IS_TAX_EXPENSE",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "NetIncomeLoss",
+          "label": "Net Income (Loss) Attributable to Parent",
+          "model_role": "IS_NET_INCOME",
+          "is_core_3_statement": true,
+          "is_dcf_key": true,
+          "is_comps_key": true,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 5879000000.0
+          },
+          "supporting_tags": [
+            "NetIncomeLoss"
+          ],
+          "llm_classification": {
+            "best_fit_role": "IS_NET_INCOME",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "DepreciationDepletionAndAmortization",
+          "label": "Depreciation, Depletion and Amortization",
+          "model_role": "IS_D_AND_A",
+          "is_core_3_statement": true,
+          "is_dcf_key": true,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 7567000000.0
+          },
+          "supporting_tags": [
+            "DepreciationDepletionAndAmortization"
+          ],
+          "llm_classification": {
+            "best_fit_role": "IS_D_AND_A",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "COMPUTED_IS_OPERATING_EXPENSE",
+          "label": "Computed: Operating Costs / Margin",
+          "model_role": "IS_OPERATING_EXPENSE",
+          "is_core_3_statement": true,
+          "is_dcf_key": true,
+          "is_comps_key": false,
+          "llm_classification": {
+            "best_fit_role": "IS_OPERATING_EXPENSE",
+            "confidence": 1.0,
+            "source": "computed"
+          },
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 179773000000.0
+          },
+          "variable_status": "computed",
+          "computation_method": "Revenue - Operating Income",
+          "supporting_tags": [
+            "Revenues",
+            "OperatingIncomeLoss"
+          ],
+          "reconciliation_notes": [],
+          "subitems": []
+        },
+        {
+          "tag": "COMPUTED_IS_EBITDA",
+          "label": "Computed: EBITDA Margins / Costs",
+          "model_role": "IS_EBITDA",
+          "is_core_3_statement": true,
+          "is_dcf_key": true,
+          "is_comps_key": true,
+          "llm_classification": {
+            "best_fit_role": "IS_EBITDA",
+            "confidence": 1.0,
+            "source": "computed"
+          },
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 12786000000.0
+          },
+          "variable_status": "computed",
+          "computation_method": "Operating Income + Depreciation & Amortization",
+          "supporting_tags": [
+            "OperatingIncomeLoss",
+            "DepreciationDepletionAndAmortization"
+          ],
+          "reconciliation_notes": [],
+          "subitems": []
+        }
+      ]
+    },
+    "balance_sheet": {
+      "line_items": [
+        {
+          "tag": "CashAndCashEquivalentsAtCarryingValue",
+          "label": "Cash and Cash Equivalents, at Carrying Value",
+          "model_role": "BS_CASH",
+          "is_core_3_statement": true,
+          "is_dcf_key": true,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 22935000000.0
+          },
+          "supporting_tags": [
+            "CashAndCashEquivalentsAtCarryingValue"
+          ],
+          "llm_classification": {
+            "best_fit_role": "BS_CASH",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "AccountsReceivableNetCurrent",
+          "label": "Accounts Receivable, after Allowance for Credit Loss, Current",
+          "model_role": "BS_ACCOUNTS_RECEIVABLE",
+          "is_core_3_statement": true,
+          "is_dcf_key": true,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 14723000000.0
+          },
+          "supporting_tags": [
+            "AccountsReceivableNetCurrent"
+          ],
+          "llm_classification": {
+            "best_fit_role": "BS_ACCOUNTS_RECEIVABLE",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "InventoryNet",
+          "label": "Inventory, Net",
+          "model_role": "BS_INVENTORY",
+          "is_core_3_statement": true,
+          "is_dcf_key": true,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 14951000000.0
+          },
+          "supporting_tags": [
+            "InventoryNet"
+          ],
+          "llm_classification": {
+            "best_fit_role": "BS_INVENTORY",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "PropertyPlantAndEquipmentNet",
+          "label": "Property, Plant and Equipment, Net",
+          "model_role": "BS_PP_AND_E",
+          "is_core_3_statement": true,
+          "is_dcf_key": true,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 41928000000.0
+          },
+          "supporting_tags": [
+            "PropertyPlantAndEquipmentNet"
+          ],
+          "llm_classification": {
+            "best_fit_role": "BS_PP_AND_E",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "AssetsCurrent",
+          "label": "Assets, Current",
+          "model_role": "BS_ASSETS_CURRENT",
+          "is_core_3_statement": true,
+          "is_dcf_key": false,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 124474000000.0
+          },
+          "supporting_tags": [
+            "AssetsCurrent"
+          ],
+          "llm_classification": {
+            "best_fit_role": "BS_ASSETS_CURRENT",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "Assets",
+          "label": "Assets",
+          "model_role": "BS_ASSETS_TOTAL",
+          "is_core_3_statement": true,
+          "is_dcf_key": false,
+          "is_comps_key": true,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 285196000000.0
+          },
+          "supporting_tags": [
+            "Assets"
+          ],
+          "llm_classification": {
+            "best_fit_role": "BS_ASSETS_TOTAL",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "AccountsPayableAndAccruedLiabilitiesCurrent",
+          "label": "Accounts Payable and Accrued Liabilities, Current",
+          "model_role": "BS_AP_AND_ACCRUED",
+          "is_core_3_statement": true,
+          "is_dcf_key": false,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 24128000000.0
+          },
+          "supporting_tags": [
+            "AccountsPayableAndAccruedLiabilitiesCurrent"
+          ],
+          "llm_classification": {
+            "best_fit_role": "BS_AP_AND_ACCRUED",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "LiabilitiesCurrent",
+          "label": "Liabilities, Current",
+          "model_role": "BS_LIABILITIES_CURRENT",
+          "is_core_3_statement": true,
+          "is_dcf_key": false,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 106859000000.0
+          },
+          "supporting_tags": [
+            "LiabilitiesCurrent"
+          ],
+          "llm_classification": {
+            "best_fit_role": "BS_LIABILITIES_CURRENT",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "Liabilities",
+          "label": "Liabilities",
+          "model_role": "BS_LIABILITIES_TOTAL",
+          "is_core_3_statement": true,
+          "is_dcf_key": false,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 240338000000.0
+          },
+          "supporting_tags": [
+            "Liabilities"
+          ],
+          "llm_classification": {
+            "best_fit_role": "BS_LIABILITIES_TOTAL",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "StockholdersEquity",
+          "label": "Stockholders' Equity Attributable to Parent",
+          "model_role": "BS_EQUITY_TOTAL",
+          "is_core_3_statement": true,
+          "is_dcf_key": false,
+          "is_comps_key": true,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 44835000000.0
+          },
+          "supporting_tags": [
+            "StockholdersEquity"
+          ],
+          "llm_classification": {
+            "best_fit_role": "BS_EQUITY_TOTAL",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "COMPUTED_BS_ACCRUED_LIABILITIES",
+          "label": "Computed: Accrued Expenses",
+          "model_role": "BS_ACCRUED_LIABILITIES",
+          "is_core_3_statement": true,
+          "is_dcf_key": false,
+          "is_comps_key": false,
+          "llm_classification": {
+            "best_fit_role": "BS_ACCRUED_LIABILITIES",
+            "confidence": 1.0,
+            "source": "computed"
+          },
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 24128000000.0
+          },
+          "variable_status": "proxy",
+          "computation_method": "Accounts Payable + Accrued Liabilities Combined (proxy)",
+          "supporting_tags": [
+            "AccountsPayableAndAccruedLiabilitiesCurrent"
+          ],
+          "reconciliation_notes": [
+            "Using combined AP+Accrued as proxy (separate AP not available)"
+          ],
+          "subitems": []
+        }
+      ]
+    },
+    "cash_flow_statement": {
+      "line_items": [
+        {
+          "tag": "NetCashProvidedByUsedInOperatingActivities",
+          "label": "Net Cash Provided by (Used in) Operating Activities",
+          "model_role": "CF_CASH_FROM_OPERATIONS",
+          "is_core_3_statement": true,
+          "is_dcf_key": true,
+          "is_comps_key": true,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 15423000000.0
+          },
+          "supporting_tags": [
+            "NetCashProvidedByUsedInOperatingActivities"
+          ],
+          "llm_classification": {
+            "best_fit_role": "CF_CASH_FROM_OPERATIONS",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "DepreciationDepletionAndAmortization",
+          "label": "Depreciation, Depletion and Amortization",
+          "model_role": "CF_DEPRECIATION",
+          "is_core_3_statement": true,
+          "is_dcf_key": true,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 7567000000.0
+          },
+          "supporting_tags": [
+            "DepreciationDepletionAndAmortization"
+          ],
+          "llm_classification": {
+            "best_fit_role": "CF_DEPRECIATION",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "NetCashProvidedByUsedInInvestingActivities",
+          "label": "Net Cash Provided by (Used in) Investing Activities",
+          "model_role": "CF_CASH_FROM_INVESTING",
+          "is_core_3_statement": true,
+          "is_dcf_key": false,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": -24370000000.0
+          },
+          "supporting_tags": [
+            "NetCashProvidedByUsedInInvestingActivities"
+          ],
+          "llm_classification": {
+            "best_fit_role": "CF_CASH_FROM_INVESTING",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "ProceedsFromIssuanceOfLongTermDebt",
+          "label": "Proceeds from Issuance of Long-term Debt",
+          "model_role": "CF_DEBT_ISSUANCE",
+          "is_core_3_statement": true,
+          "is_dcf_key": false,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 57312000000.0
+          },
+          "supporting_tags": [
+            "ProceedsFromIssuanceOfLongTermDebt"
+          ],
+          "llm_classification": {
+            "best_fit_role": "CF_DEBT_ISSUANCE",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "RepaymentsOfLongTermDebt",
+          "label": "Repayments of Long-term Debt",
+          "model_role": "CF_DEBT_REPAYMENT",
+          "is_core_3_statement": true,
+          "is_dcf_key": false,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 45680000000.0
+          },
+          "supporting_tags": [
+            "RepaymentsOfLongTermDebt"
+          ],
+          "llm_classification": {
+            "best_fit_role": "CF_DEBT_REPAYMENT",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "PaymentsForRepurchaseOfCommonStock",
+          "label": "Payments for Repurchase of Common Stock",
+          "model_role": "CF_SHARE_REPURCHASES",
+          "is_core_3_statement": true,
+          "is_dcf_key": false,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 426000000.0
+          },
+          "supporting_tags": [
+            "PaymentsForRepurchaseOfCommonStock"
+          ],
+          "llm_classification": {
+            "best_fit_role": "CF_SHARE_REPURCHASES",
+            "confidence": 1.0
+          }
+        },
+        {
+          "tag": "NetCashProvidedByUsedInFinancingActivities",
+          "label": "Net Cash Provided by (Used in) Financing Activities",
+          "model_role": "CF_CASH_FROM_FINANCING",
+          "is_core_3_statement": true,
+          "is_dcf_key": false,
+          "is_comps_key": false,
+          "status": "direct",
+          "unit": "USD",
+          "periods": {
+            "2024-12-31": 7485000000.0
+          },
+          "supporting_tags": [
+            "NetCashProvidedByUsedInFinancingActivities"
+          ],
+          "llm_classification": {
+            "best_fit_role": "CF_CASH_FROM_FINANCING",
+            "confidence": 1.0
+          }
+        }
+      ]
+    }
+  },
+  "computed_variables": {
+    "Operating Costs / Margin": {
+      "variable_name": "Operating Costs / Margin",
+      "model_role": "IS_OPERATING_EXPENSE",
+      "periods": {
+        "2024-12-31": 179773000000.0
+      },
+      "status": "computed",
+      "supporting_tags": [
+        "Revenues",
+        "OperatingIncomeLoss"
+      ],
+      "computation_method": "Revenue - Operating Income",
+      "guardrails": []
+    },
+    "EBITDA Margins / Costs": {
+      "variable_name": "EBITDA Margins / Costs",
+      "model_role": "IS_EBITDA",
+      "periods": {
+        "2024-12-31": 12786000000.0
+      },
+      "status": "computed",
+      "supporting_tags": [
+        "OperatingIncomeLoss",
+        "DepreciationDepletionAndAmortization"
+      ],
+      "computation_method": "Operating Income + Depreciation & Amortization",
+      "guardrails": []
+    },
+    "Accrued Expenses": {
+      "variable_name": "Accrued Expenses",
+      "model_role": "BS_ACCRUED_LIABILITIES",
+      "periods": {
+        "2024-12-31": 24128000000.0
+      },
+      "status": "proxy",
+      "supporting_tags": [
+        "AccountsPayableAndAccruedLiabilitiesCurrent"
+      ],
+      "computation_method": "Accounts Payable + Accrued Liabilities Combined (proxy)",
+      "guardrails": [
+        "Using combined AP+Accrued as proxy (separate AP not available)"
+      ]
+    },
+    "Gross Profit": {
+      "variable_name": "Gross Profit",
+      "model_role": "IS_GROSS_PROFIT",
+      "periods": {
+        "2024-12-31": 26558000000.0
+      },
+      "status": "computed",
+      "supporting_tags": [
+        "Revenues",
+        "CostOfGoodsAndServicesSold"
+      ],
+      "computation_method": "Revenue - COGS",
+      "guardrails": []
+    },
+    "Operating Margin": {
+      "variable_name": "Operating Margin",
+      "model_role": "IS_OPERATING_INCOME",
+      "periods": {
+        "2024-12-31": 0.028212030790520672
+      },
+      "status": "computed",
+      "supporting_tags": [
+        "OperatingIncomeLoss",
+        "Revenues"
+      ],
+      "computation_method": "Operating Income / Revenue",
+      "guardrails": []
+    }
+  },
+  "reconciliation": {
+    "balance_sheet": {
+      "status": "pass",
+      "periods": {
+        "2024-12-31": {
+          "assets": 285196000000.0,
+          "liabilities": 240338000000.0,
+          "equity": 44835000000.0,
+          "sum": 285173000000.0,
+          "difference": 23000000.0,
+          "difference_pct": 8.064629237436711e-05,
+          "passes": true
+        }
+      },
+      "resolution": "All periods reconcile within tolerance"
+    },
+    "cash_flow": {
+      "status": "pass",
+      "periods": {
+        "2024-12-31": {
+          "cfo": 15423000000.0,
+          "cfi": -24370000000.0,
+          "cff": 7485000000.0,
+          "net_change": null,
+          "ending_cash": 22935000000.0,
+          "beginning_cash": null,
+          "cf_sum": null,
+          "cf_difference": null,
+          "cf_passes": null,
+          "cf_reason": "Missing required line items",
+          "cash_change": null,
+          "cash_difference": null,
+          "cash_passes": null,
+          "cash_reason": "Missing required line items",
+          "passes": false
+        }
+      },
+      "resolution": "All periods reconcile within tolerance"
+    },
+    "is_to_cf": {
+      "status": "fail",
+      "periods": {
+        "2024-12-31": {
+          "is_net_income": 5879000000.0,
+          "cf_net_income": null,
+          "difference": null,
+          "passes": false,
+          "reason": "Missing required line items"
+        }
+      },
+      "resolution": "Re-check consolidated selector for Net Income tags"
+    },
+    "overall_status": "fail"
+  },
+  "metadata": {
+    "cik": "0000037996",
+    "ticker": "F",
+    "company_name": "Ford Motor Co",
+    "filing_type": "10-K",
+    "filing_accession": "0000037996-25-000013",
+    "fiscal_year": "2024",
+    "fiscal_period": "FY",
+    "statement_currency": "USD",
+    "us_gaap_taxonomy_year": ""
+  },
+  "comps_config": {
+    "sector": "",
+    "industry": "",
+    "peer_selection_rule": {
+      "by_sector_industry": false,
+      "market_cap_tolerance_pct": null
+    },
+    "key_metrics": [],
+    "metric_sources": {}
+  }
+}

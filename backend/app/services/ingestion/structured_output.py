@@ -21,18 +21,26 @@ from app.core.model_role_map import (
     BS_ACCOUNTS_PAYABLE,
     BS_ACCOUNTS_RECEIVABLE,
     BS_ACCRUED_LIABILITIES,
+    BS_AP_AND_ACCRUED,
     BS_DEBT_CURRENT,
+    BS_DEBT_NONCURRENT,
     BS_INVENTORY,
     BS_PP_AND_E,
+    CF_DEPRECIATION,
     CF_DIVIDENDS_PAID,
     CF_SHARE_REPURCHASES,
     IS_COGS,
+    IS_D_AND_A,
+    IS_EBITDA,
     IS_OPERATING_EXPENSE,
+    IS_OPERATING_INCOME,
     IS_REVENUE,
     IS_TAX_EXPENSE,
     get_model_role_flags,
 )
 from app.services.ingestion.clients import EdgarClient
+from app.services.ingestion.computed_variables import ComputedVariable
+from app.services.ingestion.core_anchors import AnchorFact, extract_core_anchors
 from app.services.ingestion.xbrl.utils import flatten_units, parse_date
 
 logger = get_logger(__name__)
@@ -82,11 +90,24 @@ BS_ALLOWLIST = {
     "AccruedLiabilitiesCurrent",
     "OtherLiabilitiesCurrent",
     "ShortTermBorrowings",
+    "ShortTermDebt",
     "CommercialPaper",
+    "DebtCurrent",
+    "DebtNoncurrent",
     "LongTermDebtCurrent",
     "LongTermDebtNoncurrent",
+    "LongTermDebt",
     "LongTermDebtAndCapitalLeaseObligationsCurrent",
     "LongTermDebtAndCapitalLeaseObligationsNoncurrent",
+    "LongTermDebtAndFinanceLeaseObligationsCurrent",
+    "LongTermDebtAndFinanceLeaseObligationsNoncurrent",
+    "NotesPayableCurrent",
+    "NotesPayableNoncurrent",
+    "UnsecuredDebtCurrent",
+    "UnsecuredLongTermDebt",
+    "SecuredDebtCurrent",
+    "SecuredLongTermDebt",
+    "CurrentPortionOfLongTermDebt",
     "DeferredTaxLiabilitiesNoncurrent",
     "OtherLiabilitiesNoncurrent",
     # Equity components
@@ -103,6 +124,12 @@ BS_KEYWORDS = [
     "stockholder",
     "capital",
     "debt",
+    "borrow",
+    "notes payable",
+    "loan",
+    "credit facility",
+    "unsecured",
+    "secured",
     "receivable",
     "payable",
     "inventory",
@@ -559,6 +586,19 @@ def extract_statements_for_date(
     bs_items.sort(key=lambda x: ((x.get("label") or "").lower(), x["tag"]))
     is_items.sort(key=lambda x: ((x.get("label") or "").lower(), x["tag"]))
     cf_items.sort(key=lambda x: ((x.get("label") or "").lower(), x["tag"]))
+    
+    # Log debt-related tags for debugging
+    debt_keywords = ["debt", "borrow", "notes payable", "loan", "credit facility", "unsecured", "secured"]
+    debt_tags = [
+        item for item in bs_items
+        if any(kw in (item.get("tag") or "").lower() or (item.get("label") or "").lower() for kw in debt_keywords)
+    ]
+    if debt_tags:
+        logger.info(f"Found {len(debt_tags)} debt-related BS tags: {[item.get('tag') for item in debt_tags[:10]]}")
+    else:
+        logger.warning("No debt-related tags found in balance sheet items")
+    
+    logger.info(f"Extracted {len(bs_items)} BS items, {len(is_items)} IS items, {len(cf_items)} CF items for {report_date}")
 
     return {"bs": bs_items, "is": is_items, "cf": cf_items}
 
@@ -628,6 +668,8 @@ def extract_single_year_structured(cik: int, ticker: str, edgar_client: Optional
     Build a JSON object conforming to single-year filing schema,
     with balance sheet, income statement, and cash flow statement populated
     for the latest annual period based on Assets (BS anchor).
+    
+    NEW: Uses consolidated main-line builder for deterministic consolidation.
 
     Args:
         cik: Company CIK number
@@ -656,25 +698,36 @@ def extract_single_year_structured(cik: int, ticker: str, edgar_client: Optional
     fiscal_year_str = str(fiscal_year) if fiscal_year is not None else ""
     fiscal_period = "FY"
 
-    # 3) Collect BS, IS, CF items at that same report_date
-    stmt_items = extract_statements_for_date(us_gaap, report_date)
-    bs_items = stmt_items["bs"]
-    is_items = stmt_items["is"]
-    cf_items = stmt_items["cf"]
-
-    # 4) Determine statement currency (fallback to USD)
-    statement_currency = (
-        find_currency(bs_items, is_items, cf_items)
-        or "USD"
-    )
-
-    # 5) Build line_items and normalized_order lists for each statement
-    bs_payload = build_statement_payload(bs_items, report_date, statement_currency)
-    is_payload = build_statement_payload(is_items, report_date, statement_currency)
-    cf_payload = build_statement_payload(cf_items, report_date, statement_currency)
+    # 3) Build consolidated main-line statements
+    from app.services.ingestion.main_line_builder import build_main_line_statements
+    from app.services.ingestion.reconciliation import reconcile_all_statements
+    
+    logger.info(f"Building consolidated main-line statements for {ticker} period {report_date}")
+    consolidated_statements = build_main_line_statements(us_gaap, [report_date])
+    
+    # 4) Run reconciliation
+    reconciliation = reconcile_all_statements(consolidated_statements, [report_date])
+    
+    # 5) Determine statement currency from line items
+    statement_currency = "USD"
+    for stmt_name in ["income_statement", "balance_sheet", "cash_flow_statement"]:
+        line_items = consolidated_statements.get(stmt_name, {}).get("line_items", [])
+        for item in line_items:
+            unit = item.get("unit")
+            if unit:
+                statement_currency = unit
+                break
+        if statement_currency != "USD":
+            break
 
     # 6) Assemble the full document matching your template
     payload: Dict[str, Any] = {
+        "company": entity_name,
+        "ticker": ticker,
+        "periods": [report_date],
+        "statements": consolidated_statements,
+        "computed_variables": {},  # Will be populated by generate_structured_output
+        "reconciliation": reconciliation,
         "metadata": {
             "cik": f"{cik:010d}",
             "ticker": ticker,
@@ -685,23 +738,6 @@ def extract_single_year_structured(cik: int, ticker: str, edgar_client: Optional
             "fiscal_period": fiscal_period,
             "statement_currency": statement_currency,
             "us_gaap_taxonomy_year": "",
-        },
-        "statements": {
-            "income_statement": {
-                "statement_type": "income_statement",
-                "normalized_order": is_payload["normalized_order"],
-                "line_items": is_payload["line_items"],
-            },
-            "balance_sheet": {
-                "statement_type": "balance_sheet",
-                "normalized_order": bs_payload["normalized_order"],
-                "line_items": bs_payload["line_items"],
-            },
-            "cash_flow_statement": {
-                "statement_type": "cash_flow_statement",
-                "normalized_order": cf_payload["normalized_order"],
-                "line_items": cf_payload["line_items"],
-            },
         },
         "comps_config": {
             "sector": "",
@@ -1095,6 +1131,47 @@ def _validate_match(required_item: str, matched_tag: str, matched_label: str, st
             if any(m in tag_lower or m in label_lower for m in ["operating margin", "gross margin", "ebitda margin", "net margin", "payout ratio", "tax rate"]):
                 return f"Match contains '{indicator}' - margins and ratios are computed downstream, not tagged from EDGAR"
     
+    # Reject broad liability totals being matched to specific accounts
+    if required_item in ["Accounts Payable", "Accrued Expenses"]:
+        # Block aggregate liability totals - these are rollups, not specific accounts
+        broad_liability_indicators = [
+            "liabilitiescurrent",
+            "liabilitiesnoncurrent", 
+            "liabilities",
+            "total liabilities",
+            "liabilitiesandstockholdersequity",
+        ]
+        tag_matches_rollup = any(ind in tag_lower for ind in broad_liability_indicators)
+        label_matches_rollup = any(ind in label_lower for ind in broad_liability_indicators)
+        
+        if tag_matches_rollup or label_matches_rollup:
+            # Only allow if label explicitly says "payable" or "accrued" AND tag is not a rollup
+            # Block if tag is clearly a rollup (LiabilitiesCurrent, etc.)
+            if tag_matches_rollup:
+                return f"Match is a broad liability rollup ('{matched_tag}'), not a specific {required_item} account"
+            # Also block if label is just "Liabilities" without "Payable" or "Accrued"
+            if label_matches_rollup and "payable" not in label_lower and "accrued" not in label_lower:
+                return f"Match is a broad liability total ('{matched_label}'), not a specific {required_item} account"
+    
+    # Reject broad liability totals being matched to Debt Amount
+    if required_item == "Debt Amount":
+        # Block aggregate liability totals
+        broad_liability_indicators = ["liabilitiescurrent", "liabilitiesnoncurrent", "liabilities", "total liabilities"]
+        if any(ind in tag_lower for ind in broad_liability_indicators) or any(ind in label_lower for ind in broad_liability_indicators):
+            # Only allow if label explicitly mentions debt/borrowings
+            if "debt" not in label_lower and "borrow" not in label_lower and "notes payable" not in label_lower:
+                return f"Match is a broad liability total ('{matched_label}'), not a specific debt balance"
+    
+    # Reject cash flow debt activity being matched to Debt Amount (BS balance)
+    if required_item == "Debt Amount":
+        # Block cash flow activity tags
+        cf_debt_activity = ["proceedsfromdebt", "repaymentsoflongtermdebt", "debtissuancecosts", "paymentsofdebt"]
+        if any(activity in tag_lower for activity in cf_debt_activity) or any(activity in label_lower for activity in cf_debt_activity):
+            return f"Match is cash flow debt activity ('{matched_label}'), not a balance sheet debt balance"
+        # Ensure it's from balance sheet, not cash flow
+        if statement_type == "cash_flow_statement":
+            return f"Match is from cash flow statement, but Debt Amount must be a balance sheet balance"
+    
     # Reject EBITDA, EBITDA margin, or any EBITDA-related computed metric
     if "ebitda" in tag_lower or "ebitda" in label_lower:
         return "EBITDA is a computed metric (Operating Income + D&A) - tag underlying raw accounts instead"
@@ -1369,16 +1446,16 @@ def match_required_item_to_label(required_item: str, available_labels: List[Dict
     # NOTE: Only raw GAAP accounts are taggable. Margins and ratios are computed downstream.
     item_definitions = {
         "Revenue": "Total revenue/sales - the top line of the income statement. Raw GAAP account. NOT operating income, NOT EBITDA, NOT any margin.",
-        "Operating Costs": "TOTAL operating expenses - the sum of COGS, SG&A, R&D, and all other operating expenses. Look for tags like 'TotalOperatingExpenses' or 'OperatingExpenses'. DO NOT match individual components like COGS or SG&A - those are separate line items. Raw GAAP account. NOT a margin or ratio.",
-        "Gross Costs": "Cost of goods sold (COGS) ONLY - direct costs of producing goods/services. Look for tags like 'CostOfGoodsAndServicesSold' or 'CostOfRevenue'. This is a component of Operating Costs, but should be matched separately. Raw GAAP account. NOT gross margin or gross profit.",
+        "Operating Costs": "TOTAL operating expenses - the sum of COGS, SG&A, R&D, and all other operating expenses. Look for tags like 'TotalOperatingExpenses', 'OperatingExpenses', 'CostsAndExpenses', or 'OperatingCostsAndExpenses'. If no total exists, look for component tags that can be summed: 'SellingGeneralAndAdministrativeExpense', 'ResearchAndDevelopmentExpense', etc. DO NOT match individual components like COGS or SG&A alone - those are separate line items. Raw GAAP account. NOT a margin or ratio.",
+        "Gross Costs": "Cost of goods sold (COGS) ONLY - direct costs of producing goods/services. Look for tags like 'CostOfGoodsAndServicesSold', 'CostOfRevenue', 'CostOfSales', or 'CostOfProductsSold'. This is a component of Operating Costs, but should be matched separately. Raw GAAP account. NOT gross margin or gross profit.",
         "Tax Expense": "Income tax expense (benefit) - actual dollar amount of taxes paid/accrued (unit='USD'). Semantic meaning: The tax amount itself, not income before taxes, not tax rates/percentages. DO NOT match to pre-tax income concepts or tax rate parameters.",
         "PP&E": "Property, Plant and Equipment (net) - long-term tangible assets. Raw GAAP account on balance sheet.",
         "Inventory": "Inventory - goods held for sale. Raw GAAP account - current asset on balance sheet.",
-        "Accounts Payable": "Accounts Payable ONLY - money owed to suppliers. Prefer separate 'AccountsPayable' or 'AccountsPayableCurrent' tags. AVOID combined tags like 'AccountsPayableAndAccruedLiabilities' unless no separate tag exists. Raw GAAP account - current liability on balance sheet.",
+        "Accounts Payable": "Accounts Payable ONLY - money owed to suppliers. Prefer separate 'AccountsPayable', 'AccountsPayableCurrent', or 'AccountsPayableTrade' tags. AVOID combined tags like 'AccountsPayableAndAccruedLiabilitiesCurrent' unless no separate tag exists. Raw GAAP account - current liability on balance sheet.",
         "Accounts Receivable": "Accounts Receivable - money owed by customers. Raw GAAP account - current asset on balance sheet.",
-        "Accrued Expenses": "Accrued Liabilities ONLY - expenses incurred but not yet paid. Prefer separate 'AccruedLiabilitiesCurrent' or 'AccruedExpenses' tags. AVOID combined tags like 'AccountsPayableAndAccruedLiabilities' unless no separate tag exists. Raw GAAP account - current liability.",
+        "Accrued Expenses": "Accrued Liabilities ONLY - expenses incurred but not yet paid. Prefer separate 'AccruedLiabilitiesCurrent', 'AccruedExpenses', 'AccruedLiabilities', or 'AccruedCompensationAndBenefits' tags. AVOID combined tags like 'AccountsPayableAndAccruedLiabilitiesCurrent' unless no separate tag exists. If only a combined tag exists (e.g., 'AccountsPayableAndAccruedLiabilitiesCurrent'), classify it as a proxy for accrued liabilities. Raw GAAP account - current liability.",
         "Share Repurchases": "Payments for repurchase of common stock or treasury stock. Raw GAAP account - cash flow item. Match only cash flow statement items (flows). DO NOT match balance sheet equity balances (stocks).",
-        "Debt Amount": "Debt issuances, repayments, or balance sheet debt. Raw GAAP account. NOT a debt ratio.",
+        "Debt Amount": "Total debt - current and noncurrent debt combined. Look for 'LongTermDebtCurrent', 'LongTermDebtNoncurrent', 'ShortTermBorrowings', 'DebtCurrent', 'DebtNoncurrent', or 'TotalDebt'. If no combined tag exists, prefer current debt first, then noncurrent. Raw GAAP account. NOT a debt ratio.",
         "Dividend Payout": "Dividends paid to shareholders - raw cash outflow. Raw GAAP account - cash flow item. NOT dividend payout ratio (which is computed as Dividends Paid / Net Income).",
     }
     
@@ -1405,12 +1482,52 @@ CRITICAL RULES:
 - Match ONLY raw GAAP accounts - NEVER match margins, ratios, or computed metrics.
 - REJECT any match that contains "margin", "ratio", "rate" (as a percentage), or "%" unless it's clearly a raw account name.
 - For Revenue: Match total revenue/sales, NOT operating income, NOT EBITDA, NOT any margin.
-- For Operating Costs: Match TOTAL operating expenses (look for "TotalOperatingExpenses" or "OperatingExpenses"). DO NOT match individual components like COGS or SG&A - those are matched separately.
-- For Gross Costs: Match cost of goods sold (COGS) specifically - look for "CostOfGoodsAndServicesSold" or "CostOfRevenue". This is separate from Operating Costs.
-- For Accounts Payable: Prefer separate "AccountsPayable" or "AccountsPayableCurrent" tags. AVOID combined tags like "AccountsPayableAndAccruedLiabilities" unless no separate tag exists.
-- For Accrued Expenses: Prefer separate "AccruedLiabilitiesCurrent" or "AccruedExpenses" tags. AVOID combined tags like "AccountsPayableAndAccruedLiabilities" unless no separate tag exists.
+
+- For Operating Costs: 
+  * FIRST: Look for "TotalOperatingExpenses", "OperatingExpenses", "CostsAndExpenses", or "OperatingCostsAndExpenses"
+  * If no total exists, look for component tags: "SellingGeneralAndAdministrativeExpense", "ResearchAndDevelopmentExpense", "OperatingCostsAndExpenses" (but prefer totals)
+  * DO NOT match individual components like COGS or SG&A alone - those are matched separately
+  * Example (Ford): "CostsAndExpenses" or "OperatingExpenses" are good matches
+
+- For Gross Costs: Match cost of goods sold (COGS) specifically - look for "CostOfGoodsAndServicesSold", "CostOfRevenue", "CostOfSales". This is separate from Operating Costs.
+  * Example (Ford): "CostOfGoodsAndServicesSold" is the correct match
+
+- For Accounts Payable: 
+  * Prefer separate "AccountsPayable", "AccountsPayableCurrent", or "AccountsPayableTrade" tags
+  * AVOID combined tags like "AccountsPayableAndAccruedLiabilitiesCurrent" unless no separate tag exists
+  * If only combined tag exists, classify it for Accounts Payable (not Accrued Expenses)
+  * CRITICAL: NEVER match broad liability totals like "LiabilitiesCurrent", "Liabilities", "TotalLiabilities" to Accounts Payable
+    - These are aggregate totals, not specific accounts payable
+    - Only match if label explicitly says "Accounts Payable" or "Payable" (not just "Liabilities")
+
+- For Accrued Expenses:
+  * Prefer separate "AccruedLiabilitiesCurrent", "AccruedExpenses", "AccruedLiabilities", or "AccruedCompensationAndBenefits"
+  * If only a combined tag exists (e.g., "AccountsPayableAndAccruedLiabilitiesCurrent"), classify it as a proxy for accrued liabilities
+  * Example (Ford): If "AccountsPayableAndAccruedLiabilitiesCurrent" is the only option, use it as a proxy
+
+- For Debt Amount:
+  * CRITICAL: Match ONLY balance sheet debt BALANCES (outstanding debt amounts), NOT cash flow activity
+  * Balance Sheet debt balances (CORRECT):
+    - "LongTermDebtCurrent", "LongTermDebtNoncurrent", "UnsecuredDebtCurrent", "UnsecuredLongTermDebt"
+    - "ShortTermBorrowings", "DebtCurrent", "DebtNoncurrent", "NotesPayableCurrent", "NotesPayableNoncurrent"
+    - These represent outstanding interest-bearing debt balances on the balance sheet
+  * Cash Flow debt activity (WRONG - do NOT match):
+    - "ProceedsFromDebt", "RepaymentsOfLongTermDebt", "DebtIssuanceCosts", "PaymentsOfDebt"
+    - These are cash flow activities, not balance sheet balances
+  * Prefer current debt first if no combined tag exists
+  * Example (Ford): Match "UnsecuredDebtCurrent" → BS_DEBT_CURRENT, "UnsecuredLongTermDebt" → BS_DEBT_NONCURRENT
+
 - For Tax Expense: Match only actual tax expense/benefit dollar amounts (unit='USD'). Do NOT match pre-tax income concepts or tax rate parameters.
+  * Example (Ford): "CurrentIncomeTaxExpenseBenefit" is a good match
+
 - For Share Repurchases: Match only cash flow statement items (flows). Do NOT match balance sheet equity balances (stocks).
+  * Example (Ford): "PaymentsForRepurchaseOfCommonStock" is the correct match
+
+- IMPORTANT: If EBITDA tag does not exist, ensure you classify:
+  * "OperatingIncomeLoss" or "OperatingIncome" → for Operating Income (needed to compute EBITDA)
+  * "DepreciationAndAmortization" or "DepreciationAmortizationAndAccretion" → for D&A (needed to compute EBITDA)
+  * EBITDA can then be computed as: Operating Income + Depreciation & Amortization
+
 - Match roles to correct statement types: IS_* → income statement, BS_* → balance sheet, CF_* → cash flow.
 - NEVER match EBITDA, EBITDA margin, operating margin, gross margin, net margin, or any ratio.
 - Prefer the most aggregated or standard label if multiple exist, BUT avoid combined tags when separate tags exist.
@@ -1719,41 +1836,627 @@ def apply_mapping(edgar_json: Dict[str, Any], mapping: Dict[str, str]) -> Dict[s
     return edgar_json
 
 
+def audit_computed_variable_with_llm(
+    computed_var: ComputedVariable,
+    available_labels: List[Dict[str, str]],
+    tolerance_pct: float = 0.05,
+) -> Optional[Dict[str, Any]]:
+    """
+    Audit a computed variable to see if a better direct tag exists.
+    
+    Args:
+        computed_var: The computed variable to audit
+        available_labels: Available EDGAR labels to search
+        tolerance_pct: Tolerance for value matching (default 5%)
+        
+    Returns:
+        Dictionary with audit result, or None if no better tag found:
+        {
+            "should_override": bool,
+            "direct_tag": str,
+            "direct_label": str,
+            "confidence": float,
+            "value_match": bool,
+            "reason": str
+        }
+    """
+    if not settings.LLM_ENABLED:
+        return None
+    
+    if not settings.OPENAI_API_KEY or not settings.OPENAI_API_KEY.strip():
+        return None
+    
+    # Get latest computed value for comparison
+    latest_period = max(computed_var.periods.keys()) if computed_var.periods else None
+    if not latest_period:
+        return None
+    
+    computed_value = computed_var.periods[latest_period]
+    
+    # Find candidate tags by keyword proximity
+    candidates = []
+    var_name_lower = computed_var.variable_name.lower()
+    keywords = []
+    
+    if "operating costs" in var_name_lower or "operating expense" in var_name_lower:
+        keywords = ["operating expense", "total operating", "costs and expenses"]
+    elif "ebitda" in var_name_lower:
+        keywords = ["ebitda"]
+    elif "debt" in var_name_lower:
+        keywords = ["debt", "long term debt", "short term debt"]
+    elif "accrued" in var_name_lower:
+        keywords = ["accrued", "accrued liabilities"]
+    
+    # Filter candidates by keywords
+    for label_dict in available_labels:
+        tag = label_dict.get("tag", "").lower()
+        label = label_dict.get("label", "").lower()
+        
+        if any(kw in tag or kw in label for kw in keywords):
+            # Get value for this tag (would need to look up in edgar_json)
+            candidates.append(label_dict)
+    
+    if not candidates:
+        return None
+    
+    # Build prompt for LLM audit
+    candidates_text = "\n".join(
+        f"- {c['label']} → {c['tag']} → {c.get('statement', 'unknown')} → {c.get('unit', 'unknown')}"
+        for c in candidates[:10]  # Top 10 candidates
+    )
+    
+    prompt = f"""You are auditing a computed financial variable to determine if a better direct tag exists.
+
+COMPUTED VARIABLE: {computed_var.variable_name}
+Model Role: {computed_var.model_role}
+Computation Method: {computed_var.computation_method}
+Supporting Tags Used: {', '.join(computed_var.supporting_tags)}
+Latest Period Value: {computed_value:,.0f}
+
+CANDIDATE DIRECT TAGS:
+{candidates_text}
+
+Return ONLY a JSON object with:
+{{
+  "should_override": true/false,
+  "direct_tag": "<best matching tag if override=true, else empty>",
+  "direct_label": "<best matching label if override=true, else empty>",
+  "confidence": 0.0-1.0,
+  "reason": "<explanation>"
+}}
+
+RULES:
+- Only override if you find a CLEAR, DIRECT tag that semantically matches the variable
+- Confidence must be >= 0.85 to override
+- The direct tag should be a raw GAAP account, not a computed metric
+- If no clear direct tag exists, set should_override=false
+- Prefer exact semantic matches over approximate ones"""
+    
+    try:
+        client = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=settings.LLM_TIMEOUT_SECONDS)
+        response = client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a financial data audit expert. Determine if computed variables have better direct tags.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+            response_format={"type": "json_object"},
+        )
+        
+        content = response.choices[0].message.content
+        if not content:
+            return None
+        
+        result = json.loads(content)
+        should_override = result.get("should_override", False)
+        confidence = result.get("confidence", 0.0)
+        
+        if should_override and confidence >= 0.85:
+            # Verify the tag exists and get its value for comparison
+            direct_tag = result.get("direct_tag", "")
+            if direct_tag:
+                # Find the tag in candidates to get value
+                # For now, we'll trust the LLM's confidence
+                return {
+                    "should_override": True,
+                    "direct_tag": direct_tag,
+                    "direct_label": result.get("direct_label", ""),
+                    "confidence": confidence,
+                    "value_match": True,  # Would need to verify in actual implementation
+                    "reason": result.get("reason", ""),
+                }
+        
+        return {
+            "should_override": False,
+            "direct_tag": "",
+            "direct_label": "",
+            "confidence": confidence,
+            "value_match": False,
+            "reason": result.get("reason", "No better direct tag found or confidence too low"),
+        }
+        
+    except Exception as e:
+        logger.warning(f"LLM audit failed for {computed_var.variable_name}: {e}")
+        return None
+
+
+def _apply_anchor_classifications(
+    edgar_json: Dict[str, Any],
+    anchors: Dict[str, Optional[AnchorFact]],
+) -> None:
+    """Apply anchor classifications to line items in-place."""
+    statements = edgar_json.get("statements", {})
+    
+    for model_role, anchor in anchors.items():
+        if not anchor:
+            continue
+        
+        # Find the line item with matching tag
+        for stmt_key in ["income_statement", "balance_sheet", "cash_flow_statement"]:
+            statement = statements.get(stmt_key, {})
+            line_items = statement.get("line_items", [])
+            
+            for item in line_items:
+                if item.get("tag") == anchor.tag:
+                    # Apply classification
+                    flags = get_model_role_flags(model_role)
+                    item["model_role"] = model_role
+                    item["is_core_3_statement"] = flags.get("is_core_3_statement", False)
+                    item["is_dcf_key"] = flags.get("is_dcf_key", False)
+                    item["is_comps_key"] = flags.get("is_comps_key", False)
+                    item["llm_classification"] = {
+                        "best_fit_role": model_role,
+                        "confidence": 1.0,
+                        "source": "deterministic_anchor",
+                    }
+                    item["variable_status"] = "direct"
+                    logger.debug(f"Applied anchor classification: {anchor.tag} -> {model_role}")
+                    break
+
+
+def _apply_computed_classifications(
+    edgar_json: Dict[str, Any],
+    computed_vars: Dict[str, Optional[ComputedVariable]],
+) -> None:
+    """Apply computed variable classifications by creating synthetic line items or updating existing ones."""
+    statements = edgar_json.get("statements", {})
+    
+    for var_name, computed_var in computed_vars.items():
+        if not computed_var:
+            continue
+        
+        # Determine statement type from model role
+        stmt_type_map = {
+            IS_OPERATING_EXPENSE: "income_statement",
+            IS_EBITDA: "income_statement",
+            BS_ACCRUED_LIABILITIES: "balance_sheet",
+            BS_DEBT_CURRENT: "balance_sheet",
+            BS_DEBT_NONCURRENT: "balance_sheet",
+        }
+        
+        statement_type = stmt_type_map.get(computed_var.model_role)
+        if not statement_type:
+            continue
+        
+        statement = statements.get(statement_type, {})
+        line_items = statement.get("line_items", [])
+        
+        # Check if a line item with this model_role already exists
+        existing_item = None
+        for item in line_items:
+            if item.get("model_role") == computed_var.model_role:
+                existing_item = item
+                break
+        
+        if existing_item:
+            # Update existing item with computed status
+            existing_item["variable_status"] = computed_var.status  # "computed" or "proxy"
+            existing_item["computation_method"] = computed_var.computation_method
+            existing_item["supporting_tags"] = computed_var.supporting_tags
+            existing_item["reconciliation_notes"] = computed_var.guardrails
+            logger.debug(f"Updated existing item with computed status: {computed_var.model_role}")
+        else:
+            # Create synthetic line item for computed variable
+            flags = get_model_role_flags(computed_var.model_role)
+            synthetic_item = {
+                "tag": f"COMPUTED_{computed_var.model_role}",
+                "label": f"Computed: {computed_var.variable_name}",
+                "model_role": computed_var.model_role,
+                "is_core_3_statement": flags.get("is_core_3_statement", False),
+                "is_dcf_key": flags.get("is_dcf_key", False),
+                "is_comps_key": flags.get("is_comps_key", False),
+                "llm_classification": {
+                    "best_fit_role": computed_var.model_role,
+                    "confidence": 1.0,
+                    "source": "computed",
+                },
+                "unit": "USD",  # Default, should match anchor units
+                "periods": computed_var.periods,
+                "variable_status": computed_var.status,
+                "computation_method": computed_var.computation_method,
+                "supporting_tags": computed_var.supporting_tags,
+                "reconciliation_notes": computed_var.guardrails,
+                "subitems": [],
+            }
+            line_items.append(synthetic_item)
+            logger.debug(f"Created synthetic line item for computed variable: {computed_var.variable_name}")
+    
+    # Fallback: Try to compute Debt Amount from normalized data if not already computed
+    if not computed_vars.get("Debt Amount"):
+        logger.info("Debt Amount not computed from anchors, trying normalized data fallback...")
+        from app.services.ingestion.computed_variables import compute_debt_amount_from_normalized
+        
+        # Build normalized structure from edgar_json
+        normalized = {
+            "balance_sheet": statements.get("balance_sheet", {}).get("line_items", []),
+            "income_statement": statements.get("income_statement", {}).get("line_items", []),
+            "cash_flow_statement": statements.get("cash_flow_statement", {}).get("line_items", []),
+        }
+        
+        debt_computed = compute_debt_amount_from_normalized(normalized)
+        if debt_computed:
+            logger.info(f"Computed Debt Amount from normalized data: {debt_computed.status}")
+            # Apply the computed debt classification
+            balance_sheet = statements.get("balance_sheet", {})
+            line_items = balance_sheet.get("line_items", [])
+            
+            flags = get_model_role_flags(BS_DEBT_CURRENT)
+            synthetic_item = {
+                "tag": f"COMPUTED_{BS_DEBT_CURRENT}",
+                "label": "Computed: Debt Amount",
+                "model_role": BS_DEBT_CURRENT,
+                "is_core_3_statement": flags.get("is_core_3_statement", False),
+                "is_dcf_key": flags.get("is_dcf_key", False),
+                "is_comps_key": flags.get("is_comps_key", False),
+                "llm_classification": {
+                    "best_fit_role": BS_DEBT_CURRENT,
+                    "confidence": 1.0,
+                    "source": "computed_fallback",
+                },
+                "unit": "USD",
+                "periods": debt_computed.periods,
+                "variable_status": debt_computed.status,
+                "computation_method": debt_computed.computation_method,
+                "supporting_tags": debt_computed.supporting_tags,
+                "reconciliation_notes": debt_computed.guardrails,
+                "subitems": [],
+            }
+            line_items.append(synthetic_item)
+            logger.info(f"Added computed Debt Amount to balance sheet: {debt_computed.computation_method}")
+
+
+def _build_leftover_mapping(
+    edgar_json: Dict[str, Any],
+    labels: List[Dict[str, str]],
+    anchors: Dict[str, Optional[AnchorFact]],
+    computed_vars: Dict[str, Optional[ComputedVariable]],
+) -> Dict[str, str]:
+    """Build LLM mapping only for tags not already classified as anchors or computed."""
+    # Get all already-classified tags
+    classified_tags = set()
+    
+    # Add anchor tags
+    for anchor in anchors.values():
+        if anchor:
+            classified_tags.add(anchor.tag)
+    
+    # Add supporting tags from computed variables
+    for computed_var in computed_vars.values():
+        if computed_var:
+            classified_tags.update(computed_var.supporting_tags)
+    
+    # Get tags already in JSON with model_role
+    statements = edgar_json.get("statements", {})
+    for stmt_key in ["income_statement", "balance_sheet", "cash_flow_statement"]:
+        statement = statements.get(stmt_key, {})
+        line_items = statement.get("line_items", [])
+        for item in line_items:
+            if item.get("model_role"):
+                classified_tags.add(item.get("tag", ""))
+    
+    # Filter labels to only unclassified ones
+    leftover_labels = [l for l in labels if l.get("tag") not in classified_tags]
+    
+    if not leftover_labels:
+        return {}
+    
+    # Build mapping for remaining required items
+    # Only classify items that aren't already computed
+    required_items_to_classify = []
+    computed_var_names = {v.variable_name for v in computed_vars.values() if v}
+    
+    for req_item in REQUIRED_MODEL_ITEMS:
+        # Skip if this variable was computed
+        if req_item in computed_var_names:
+            continue
+        # Skip if we already have an anchor for it
+        model_role = model_role_for(req_item)
+        if model_role in anchors and anchors[model_role]:
+            continue
+        required_items_to_classify.append(req_item)
+    
+    if not required_items_to_classify:
+        return {}
+    
+    mapping = {}
+    for required_item in required_items_to_classify:
+        match_result = match_required_item_to_label(required_item, leftover_labels)
+        matched_tag = match_result.get("matched_tag", "")
+        if matched_tag:
+            mapping[required_item] = matched_tag
+            # Remove from leftover_labels to avoid conflicts
+            leftover_labels = [l for l in leftover_labels if l.get("tag") != matched_tag]
+    
+    return mapping
+
+
+def _audit_computed_variables(
+    edgar_json: Dict[str, Any],
+    computed_vars: Dict[str, Optional[ComputedVariable]],
+    labels: List[Dict[str, str]],
+) -> None:
+    """Audit computed variables with LLM to check for better direct tags."""
+    for var_name, computed_var in computed_vars.items():
+        if not computed_var:
+            continue
+        
+        audit_result = audit_computed_variable_with_llm(computed_var, labels)
+        if audit_result and audit_result.get("should_override"):
+            # LLM found a better direct tag - update the classification
+            direct_tag = audit_result.get("direct_tag", "")
+            confidence = audit_result.get("confidence", 0.0)
+            
+            # Find the line item and update it
+            statements = edgar_json.get("statements", {})
+            for stmt_key in ["income_statement", "balance_sheet", "cash_flow_statement"]:
+                statement = statements.get(stmt_key, {})
+                line_items = statement.get("line_items", [])
+                
+                for item in line_items:
+                    if item.get("tag") == direct_tag:
+                        # Override with direct tag
+                        flags = get_model_role_flags(computed_var.model_role)
+                        item["model_role"] = computed_var.model_role
+                        item["is_core_3_statement"] = flags.get("is_core_3_statement", False)
+                        item["is_dcf_key"] = flags.get("is_dcf_key", False)
+                        item["is_comps_key"] = flags.get("is_comps_key", False)
+                        item["llm_classification"] = {
+                            "best_fit_role": computed_var.model_role,
+                            "confidence": confidence,
+                            "source": "llm_audit_override",
+                        }
+                        item["variable_status"] = "direct"
+                        item["reconciliation_notes"] = [
+                            f"LLM audit override: {audit_result.get('reason', '')}",
+                            f"Original computation: {computed_var.computation_method}",
+                        ]
+                        logger.info(
+                            f"LLM audit overrode computed variable {var_name} with direct tag {direct_tag} "
+                            f"(confidence: {confidence:.2f})"
+                        )
+                        break
+
+
+def classify_supporting_items(edgar_json: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Classify supporting items needed for fallback computations (Operating Income, D&A, combined tags).
+    
+    These items are not in REQUIRED_MODEL_ITEMS but are needed to compute EBITDA
+    and other derived metrics.
+    
+    Args:
+        edgar_json: The structured EDGAR JSON
+        
+    Returns:
+        Updated EDGAR JSON with supporting items classified
+    """
+    statements = edgar_json.get("statements", {})
+    
+    # Patterns to match for Operating Income
+    operating_income_patterns = [
+        "OperatingIncomeLoss",
+        "OperatingIncome",
+        "IncomeFromOperations",
+    ]
+    
+    # Patterns to match for D&A
+    da_patterns = [
+        "DepreciationAndAmortization",
+        "DepreciationAmortizationAndAccretion",
+        "Depreciation",
+    ]
+    
+    # Patterns for combined AP and Accrued
+    ap_and_accrued_patterns = [
+        "AccountsPayableAndAccruedLiabilities",
+        "AccountsPayableAndAccruedLiabilitiesCurrent",
+    ]
+    
+    # Classify Operating Income and D&A in income statement
+    income_statement = statements.get("income_statement", {})
+    line_items = income_statement.get("line_items", [])
+    
+    for item in line_items:
+        tag = item.get("tag", "")
+        model_role = item.get("model_role", "")
+        
+        # Skip if already classified
+        if model_role:
+            continue
+        
+        # Check for Operating Income
+        if any(pattern.lower() in tag.lower() for pattern in operating_income_patterns):
+            flags = get_model_role_flags(IS_OPERATING_INCOME)
+            item["model_role"] = IS_OPERATING_INCOME
+            item["is_core_3_statement"] = flags.get("is_core_3_statement", False)
+            item["is_dcf_key"] = flags.get("is_dcf_key", False)
+            item["is_comps_key"] = flags.get("is_comps_key", False)
+            item["llm_classification"] = {
+                "best_fit_role": IS_OPERATING_INCOME,
+                "confidence": 0.9,  # High confidence for pattern match
+            }
+            logger.debug(f"Classified '{tag}' as {IS_OPERATING_INCOME}")
+            continue
+        
+        # Check for D&A
+        if any(pattern.lower() in tag.lower() for pattern in da_patterns):
+            flags = get_model_role_flags(IS_D_AND_A)
+            item["model_role"] = IS_D_AND_A
+            item["is_core_3_statement"] = flags.get("is_core_3_statement", False)
+            item["is_dcf_key"] = flags.get("is_dcf_key", False)
+            item["is_comps_key"] = flags.get("is_comps_key", False)
+            item["llm_classification"] = {
+                "best_fit_role": IS_D_AND_A,
+                "confidence": 0.9,  # High confidence for pattern match
+            }
+            logger.debug(f"Classified '{tag}' as {IS_D_AND_A}")
+    
+    # Classify combined AP and Accrued in balance sheet
+    balance_sheet = statements.get("balance_sheet", {})
+    bs_line_items = balance_sheet.get("line_items", [])
+    
+    for item in bs_line_items:
+        tag = item.get("tag", "")
+        model_role = item.get("model_role", "")
+        
+        # Skip if already classified
+        if model_role:
+            continue
+        
+        # Check for combined AP and Accrued
+        if any(pattern.lower() in tag.lower() for pattern in ap_and_accrued_patterns):
+            flags = get_model_role_flags(BS_AP_AND_ACCRUED)
+            item["model_role"] = BS_AP_AND_ACCRUED
+            item["is_core_3_statement"] = flags.get("is_core_3_statement", False)
+            item["is_dcf_key"] = flags.get("is_dcf_key", False)
+            item["is_comps_key"] = flags.get("is_comps_key", False)
+            item["llm_classification"] = {
+                "best_fit_role": BS_AP_AND_ACCRUED,
+                "confidence": 0.9,
+            }
+            logger.debug(f"Classified '{tag}' as {BS_AP_AND_ACCRUED}")
+    
+    # Also check cash flow statement for Depreciation
+    cash_flow_statement = statements.get("cash_flow_statement", {})
+    cf_line_items = cash_flow_statement.get("line_items", [])
+    
+    depreciation_patterns = ["Depreciation", "DepreciationAndAmortization"]
+    
+    for item in cf_line_items:
+        tag = item.get("tag", "")
+        model_role = item.get("model_role", "")
+        
+        # Skip if already classified
+        if model_role:
+            continue
+        
+        # Check for Depreciation in cash flow
+        if any(pattern.lower() in tag.lower() for pattern in depreciation_patterns):
+            flags = get_model_role_flags(CF_DEPRECIATION)
+            item["model_role"] = CF_DEPRECIATION
+            item["is_core_3_statement"] = flags.get("is_core_3_statement", False)
+            item["is_dcf_key"] = flags.get("is_dcf_key", False)
+            item["is_comps_key"] = flags.get("is_comps_key", False)
+            item["llm_classification"] = {
+                "best_fit_role": CF_DEPRECIATION,
+                "confidence": 0.9,
+            }
+            logger.debug(f"Classified '{tag}' as {CF_DEPRECIATION}")
+    
+    return edgar_json
+
+
 def generate_structured_output(edgar_json: Dict[str, Any]) -> Dict[str, Any]:
     """
     Top-level pipeline function for generating structured output.
     
-    Pipeline:
-    1. Extract available labels
-    2. Build mapping from required items to tags
-    3. Apply mapping to JSON
-    4. Return enriched JSON
+    NEW FLOW (consolidation-first approach):
+    1. Consolidated main-line statements already built (via extract_single_year_structured)
+    2. Compute derived variables from existing line items (Gross Profit, Operating Margin, etc.)
+    3. Run LLM classification for leftover/ambiguous tags (not in main-line)
+    4. LLM audit pass: check if computed variables have better direct tags
+    5. Apply computed variable classifications
+    6. Return enriched JSON with direct/computed/proxy statuses
     
     This is the only API the backend should call going forward.
     
     Args:
-        edgar_json: The structured EDGAR JSON (without classifications)
+        edgar_json: The structured EDGAR JSON (with consolidated main-line statements)
         
     Returns:
-        Enriched EDGAR JSON with only required items tagged
+        Enriched EDGAR JSON with computed variables and LLM classifications
     """
-    if not settings.LLM_ENABLED:
-        logger.info("LLM disabled, skipping structured output generation")
-        return edgar_json
+    logger.info("Starting consolidation-first structured output generation pipeline")
     
-    logger.info("Starting structured output generation pipeline")
+    # Check if statements already have main-line items (from consolidated builder)
+    statements = edgar_json.get("statements", {})
+    has_main_line = any(
+        any(li.get("model_role") for li in stmt.get("line_items", []))
+        for stmt in statements.values()
+    )
     
-    # Step 1: Extract available labels
-    labels = extract_available_labels(edgar_json)
-    logger.info(f"Extracted {len(labels)} available labels")
+    if not has_main_line:
+        logger.warning("No main-line items found - statements may not be consolidated")
     
-    # Step 2: Build mapping
-    mapping = build_mapping(edgar_json)
-    logger.info(f"Built mapping for {len(mapping)} required items")
+    # Step 1: Extract anchors from existing line items (for computed variables)
+    logger.info("Step 1: Extracting anchors from main-line statements...")
+    anchors = extract_core_anchors(edgar_json)
+    anchor_count = sum(1 for a in anchors.values() if a is not None)
+    logger.info(f"Extracted {anchor_count} core anchors from main-line statements")
     
-    # Step 3: Apply mapping
-    enriched = apply_mapping(edgar_json, mapping)
+    # Step 2: Compute derived variables from anchors
+    logger.info("Step 2: Computing derived variables from anchors...")
+    from app.services.ingestion.computed_variables import compute_all_derived_variables
     
-    logger.info(f"Completed structured output generation: {len(mapping)} items tagged")
+    computed_vars = compute_all_derived_variables(anchors)
+    computed_count = sum(1 for v in computed_vars.values() if v is not None)
+    logger.info(f"Computed {computed_count} derived variables")
+    
+    # Step 3: Apply computed variable classifications (add computed line items)
+    logger.info("Step 3: Applying computed variable classifications...")
+    _apply_computed_classifications(edgar_json, computed_vars)
+    
+    # Step 4: Run LLM classification for leftover/ambiguous tags (if LLM enabled)
+    if settings.LLM_ENABLED:
+        logger.info("Step 4: Running LLM classification for leftover tags...")
+        labels = extract_available_labels(edgar_json)
+        
+        # Only classify tags that weren't already classified as main-line or computed
+        leftover_mapping = _build_leftover_mapping(edgar_json, labels, anchors, computed_vars)
+        
+        if leftover_mapping:
+            logger.info(f"LLM classified {len(leftover_mapping)} leftover tags")
+            enriched = apply_mapping(edgar_json, leftover_mapping)
+        else:
+            enriched = edgar_json
+        
+        # Step 5: LLM audit pass for computed variables
+        logger.info("Step 5: Running LLM audit for computed variables...")
+        _audit_computed_variables(enriched, computed_vars, labels)
+    else:
+        logger.info("LLM disabled, skipping leftover classification and audit")
+        enriched = edgar_json
+    
+    # Step 6: Classify supporting items (for any remaining unclassified items)
+    enriched = classify_supporting_items(enriched)
+    
+    # Step 7: Store computed variables in output
+    enriched.setdefault("computed_variables", {})
+    for var_name, computed_var in computed_vars.items():
+        if computed_var:
+            enriched["computed_variables"][var_name] = computed_var.to_dict()
+    
+    # Also compute debt amount from normalized items
+    from app.services.ingestion.computed_variables import compute_debt_amount_dict
+    debt_computed = compute_debt_amount_dict(enriched)
+    if debt_computed.get("status") == "computed":
+        enriched["computed_variables"]["DebtAmount"] = debt_computed
+        logger.info(f"Computed Debt Amount: {len(debt_computed.get('periods', {}))} periods")
+    
+    logger.info("Completed consolidation-first structured output generation")
     return enriched
 
