@@ -20,6 +20,10 @@ from app.services.ingestion.live_fetcher import fetch_company_live, search_compa
 from app.services.modeling.three_statement import run_three_statement
 from app.services.modeling.dcf import run_dcf
 from app.services.modeling.comps import run_comps
+from app.services.modeling.types import (
+    build_company_model_input_from_normalized_facts,
+    CompanyModelInput,
+)
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -159,20 +163,19 @@ async def generate_model(request: GenerateModelRequest):
                 detail=f"No financial data found for ticker: {request.ticker}"
             )
         
-        # Step 2: Extract historical financials for modeling
-        # Convert from statement-type organization to period-based organization
-        financials_by_period: Dict[str, Dict[str, float]] = {}
-        
-        for stmt_type, periods_dict in company_data["financials"].items():
-            for period_end, metrics in periods_dict.items():
-                if period_end not in financials_by_period:
-                    financials_by_period[period_end] = {}
-                financials_by_period[period_end].update(metrics)
+        # Step 2: Build CompanyModelInput from normalized facts
+        logger.info("Building CompanyModelInput from normalized facts")
+        model_input = build_company_model_input_from_normalized_facts(
+            ticker=company_data["ticker"],
+            name=company_data["name"],
+            financials_by_statement=company_data["financials"],
+            periods=company_data["periods"],
+        )
         
         # Step 3: Generate 3-statement projections
         logger.info("Generating 3-statement projections")
         projections = run_three_statement(
-            historical_financials=financials_by_period,
+            model_input=model_input,
             assumptions=request.assumptions,
             forecast_periods=request.forecast_periods,
             frequency=request.frequency,
@@ -191,27 +194,55 @@ async def generate_model(request: GenerateModelRequest):
         
         # Step 5: Calculate comps (simplified - no peers in MVP)
         logger.info("Calculating comps multiples")
-        latest_period = sorted(financials_by_period.keys())[-1]
-        latest_financials = financials_by_period[latest_period]
+        comps_result = run_comps(model_input=model_input, comparables=None)
         
-        # Extract metrics for comps
-        target_financials = {
-            "revenue": latest_financials.get("revenue", 0.0),
-            "ebitda": latest_financials.get("operating_income"),  # Approximate
-            "operating_income": latest_financials.get("operating_income", 0.0),
-            "net_income": latest_financials.get("net_income", 0.0),
+        # Convert dataclass outputs to dicts for response
+        projections_dict = {
+            "periods": projections.periods,
+            "revenue": projections.revenue,
+            "cogs": projections.cogs,
+            "gross_profit": projections.gross_profit,
+            "operating_expense": projections.operating_expense,
+            "operating_income": projections.operating_income,
+            "net_income": projections.net_income,
+            "capex": projections.capex,
+            "depreciation": projections.depreciation,
+            "free_cash_flow": projections.free_cash_flow,
         }
         
-        # If we have DCF enterprise value, use it for comps
-        market_data = None
-        if dcf_result.get("enterprise_value"):
-            market_data = {
-                "enterprise_value": dcf_result["enterprise_value"],
-                "market_cap": dcf_result.get("equity_value"),
-                "shares_outstanding": request.assumptions.get("shares_outstanding"),
-            }
+        dcf_dict = {
+            "yearly_results": [
+                {
+                    "year": r.year,
+                    "ufcf": r.ufcf,
+                    "discount_factor": r.discount_factor,
+                    "pv_ufcf": r.pv_ufcf,
+                }
+                for r in dcf_result.yearly_results
+            ],
+            "terminal_value": dcf_result.terminal_value,
+            "pv_terminal_value": dcf_result.pv_terminal_value,
+            "enterprise_value": dcf_result.enterprise_value,
+            "equity_value": dcf_result.equity_value,
+            "implied_share_price": dcf_result.implied_share_price,
+            "wacc": dcf_result.wacc,
+            "terminal_growth_rate": dcf_result.terminal_growth_rate,
+        }
         
-        comps_result = run_comps(target_financials, market_data)
+        comps_dict = {
+            "subject_company": comps_result.subject_company,
+            "subject_metrics": comps_result.subject_metrics,
+            "comparables": [
+                {
+                    "name": c.name,
+                    "ev_ebitda": c.ev_ebitda,
+                    "pe": c.pe,
+                    "ev_sales": c.ev_sales,
+                }
+                for c in comps_result.comparables
+            ],
+            "implied_values": comps_result.implied_values,
+        }
         
         return GenerateModelResponse(
             company_info={
@@ -221,9 +252,9 @@ async def generate_model(request: GenerateModelRequest):
                 "taxonomy": company_data["taxonomy"],
             },
             historical_financials=company_data["financials"],
-            projections=projections,
-            dcf=dcf_result,
-            comps=comps_result,
+            projections=projections_dict,
+            dcf=dcf_dict,
+            comps=comps_dict,
         )
         
     except HTTPException:
