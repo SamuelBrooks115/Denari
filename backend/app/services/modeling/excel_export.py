@@ -380,6 +380,10 @@ def overwrite_year_headers_in_statement_section(
     2. Searches for "Year" headers in the header row(s) of that section
     3. Overwrites them with actual years from year_column_map
     
+    For Cash Flow Statement, only overwrites year headers in the "Cash Flows from Operating Activities" row.
+    The "Cash Flow Statement" title row is NOT touched.
+    For Income Statement and Balance Sheet, the years are typically 1-2 rows after the section start.
+    
     Args:
         worksheet: openpyxl Worksheet object
         statement_name: Name of the statement ("Income Statement", "Balance Sheet", or "Cash Flow Statement")
@@ -394,23 +398,39 @@ def overwrite_year_headers_in_statement_section(
         logger.warning(f"Could not find '{statement_name}' section start, skipping year header overwrite")
         return
     
-    # Search for "Year" headers in rows near the section start (typically 0-3 rows after section start)
-    # This covers the header row that contains "Year 'A'" placeholders
-    for row_offset in range(0, 4):
-        check_row = section_start_row + row_offset
+    # For Cash Flow Statement, ONLY check the "Cash Flows from Operating Activities" row for year headers
+    # Do NOT touch the "Cash Flow Statement" title row (section_start_row)
+    # For Income Statement and Balance Sheet, check rows after the section start
+    if "cash flow" in statement_name.lower():
+        # Cash Flow Statement: ONLY check "Cash Flows from Operating Activities" header row for year headers
+        # Skip the title row (section_start_row) - it should not be touched
+        check_rows = []
+        operating_header = find_statement_section_start(worksheet, "cash flows from operating activities", section_start_row)
+        if operating_header:
+            check_rows.append(operating_header)
+    else:
+        # Income Statement and Balance Sheet: years are typically 1-3 rows after section start
+        check_rows = [section_start_row + offset for offset in range(1, 4)]
+    
+    # Search for "Year" headers in the identified rows
+    for check_row in check_rows:
         if check_row > worksheet.max_row:
-            break
+            continue
         
-        # Check columns D-F (4-6) for "Year" headers
+        # Check all columns that are in year_column_map for "Year" headers
+        # This covers columns D-F and potentially more columns if year headers extend further
         year_header_found = False
-        for col_idx in range(4, 7):  # Columns D, E, F
+        # Get all columns that are mapped to years
+        mapped_columns = set(year_column_map.values())
+        # Also check a reasonable range (D through J) to catch any year headers
+        for col_idx in range(4, 11):  # Columns D through J
             cell = worksheet.cell(row=check_row, column=col_idx)
             cell_value = str(cell.value or "").strip()
             
             if "year" in cell_value.lower():
                 year_header_found = True
                 # Overwrite with actual year if this column is mapped
-                if col_idx in year_column_map.values():
+                if col_idx in mapped_columns:
                     # Find which year maps to this column
                     for year, mapped_col in year_column_map.items():
                         if mapped_col == col_idx:
@@ -489,6 +509,20 @@ def populate_historicals(
         label_cell = worksheet.cell(row=row_idx, column=2)
         label_value = str(label_cell.value or "").strip()
         if "%" in label_value:
+            continue
+        
+        # Skip "Cash Flow Statement" title row - it should not have any values written to it
+        if label_value.lower() == "cash flow statement":
+            continue
+        
+        # Skip Cash Flow section header rows - they should not have any values written to them
+        # Only year headers should be overwritten in these rows
+        cash_flow_section_headers = [
+            "cash flows from operating activities",
+            "cash flows from investing activities",
+            "cash flows from financing activities"
+        ]
+        if any(header in label_value.lower() for header in cash_flow_section_headers):
             continue
         
         # Look up values for this model_role
@@ -817,6 +851,9 @@ def find_statement_section_start(worksheet, section_name: str, start_row: int = 
     """
     Find the starting row of a statement section by searching for the section name in column B.
     
+    For main statement names ("Income Statement", "Balance Sheet", "Cash Flow Statement"),
+    uses exact matching. For subsection headers, uses substring matching.
+    
     Args:
         worksheet: openpyxl Worksheet object
         section_name: Name of the section to find (e.g., "Income Statement")
@@ -827,11 +864,23 @@ def find_statement_section_start(worksheet, section_name: str, start_row: int = 
         Row number if found, None otherwise
     """
     section_name_lower = section_name.lower()
+    
+    # Main statement names require exact matching
+    main_statements = ["income statement", "balance sheet", "cash flow statement"]
+    use_exact_match = section_name_lower in main_statements
+    
     for row_idx in range(start_row, min(max_row + 1, worksheet.max_row + 1)):
         cell = worksheet.cell(row=row_idx, column=2)  # Column B
         cell_value = str(cell.value or "").strip().lower()
-        if section_name_lower in cell_value:
-            return row_idx
+        
+        if use_exact_match:
+            # Exact match for main statement names
+            if cell_value == section_name_lower:
+                return row_idx
+        else:
+            # Substring match for subsection headers
+            if section_name_lower in cell_value:
+                return row_idx
     return None
 
 
@@ -866,6 +915,7 @@ def find_line_item_placeholders(worksheet, placeholder_text: str, start_row: int
     """
     Find rows containing placeholder text in column B.
     Excludes anchor rows (like "Total Current Assets", "Total Current Liabilities", etc.)
+    and section header rows (rows that contain section titles like "Cash Flows from Operating Activities").
     
     Args:
         worksheet: openpyxl Worksheet object
@@ -875,7 +925,7 @@ def find_line_item_placeholders(worksheet, placeholder_text: str, start_row: int
         exclude_anchors: Optional list of anchor text to exclude from results
         
     Returns:
-        List of row numbers containing the placeholder (excluding anchor rows)
+        List of row numbers containing the placeholder (excluding anchor rows and section headers)
     """
     placeholder_lower = placeholder_text.lower()
     placeholder_rows: List[int] = []
@@ -887,7 +937,14 @@ def find_line_item_placeholders(worksheet, placeholder_text: str, start_row: int
         "total current liabilities",
         "total liabilities",
         "total equity",
-        "total liabilities and equity"
+        "total liabilities and equity",
+        # Section header patterns to exclude
+        "cash flows from operating activities",
+        "cash flows from investing activities",
+        "cash flows from financing activities",
+        "operating activities",
+        "investing activities",
+        "financing activities"
     ]
     
     exclude_patterns = (exclude_anchors or []) + default_exclude
@@ -897,14 +954,29 @@ def find_line_item_placeholders(worksheet, placeholder_text: str, start_row: int
         cell = worksheet.cell(row=row_idx, column=2)  # Column B
         cell_value = str(cell.value or "").strip().lower()
         
-        # Skip if this is an anchor row
-        is_anchor = False
+        # Skip if this is an anchor row or section header row
+        is_excluded = False
         for exclude_pattern in exclude_lower:
             if exclude_pattern in cell_value:
-                is_anchor = True
+                is_excluded = True
                 break
         
-        if not is_anchor and placeholder_lower in cell_value:
+        # Also check if this row has values in data columns (D-F) - if so, it's likely a header row with data
+        # Section headers shouldn't have data values, so skip rows that do
+        has_data_values = False
+        for col_idx in range(4, 7):  # Columns D, E, F
+            data_cell = worksheet.cell(row=row_idx, column=col_idx)
+            if data_cell.value is not None and isinstance(data_cell.value, (int, float)):
+                # Check if it's a reasonable data value (not a year like 2022-2024)
+                if isinstance(data_cell.value, (int, float)) and data_cell.value > 1000:
+                    has_data_values = True
+                    break
+        
+        # Only include rows that:
+        # 1. Contain the placeholder text
+        # 2. Are not excluded patterns (anchors/section headers)
+        # 3. Don't have data values (which would indicate it's a header row with totals)
+        if not is_excluded and not has_data_values and placeholder_lower in cell_value:
             placeholder_rows.append(row_idx)
     
     return placeholder_rows
@@ -990,7 +1062,7 @@ def replace_line_item_placeholders(
     Overwrites existing placeholder rows instead of inserting new ones.
     Only inserts additional rows if there are more line items than placeholders.
     
-    IMPORTANT: Never writes to row 16 (year headers) or assumptions rows.
+    IMPORTANT: Never writes to row 16 (year headers), section header rows, or assumptions rows.
     
     Args:
         worksheet: openpyxl Worksheet object
@@ -1002,8 +1074,38 @@ def replace_line_item_placeholders(
     # Filter out row 16 (year headers) - never overwrite year headers
     placeholder_rows = [row for row in placeholder_rows if row != 16]
     
+    # Filter out section header rows (rows that contain section titles like "Cash Flows from Operating Activities")
+    section_header_patterns = [
+        "cash flows from operating activities",
+        "cash flows from investing activities",
+        "cash flows from financing activities",
+        "operating activities",
+        "investing activities",
+        "financing activities"
+    ]
+    
+    filtered_rows = []
+    for row in placeholder_rows:
+        cell_value = str(worksheet.cell(row=row, column=2).value or "").strip().lower()
+        is_section_header = any(pattern in cell_value for pattern in section_header_patterns)
+        
+        # Also check if this row has data values in columns D-F (section headers shouldn't have data)
+        has_data_values = False
+        for col_idx in range(4, 7):  # Columns D, E, F
+            data_cell = worksheet.cell(row=row, column=col_idx)
+            if data_cell.value is not None and isinstance(data_cell.value, (int, float)):
+                # Check if it's a reasonable data value (not a year like 2022-2024)
+                if isinstance(data_cell.value, (int, float)) and data_cell.value > 1000:
+                    has_data_values = True
+                    break
+        
+        if not is_section_header and not has_data_values:
+            filtered_rows.append(row)
+    
+    placeholder_rows = filtered_rows
+    
     if not placeholder_rows:
-        logger.warning("No valid placeholder rows found (excluding row 16)")
+        logger.warning("No valid placeholder rows found (excluding row 16 and section headers)")
         return
     
     # Replace placeholders one-to-one with line items
@@ -1455,6 +1557,20 @@ def populate_three_statement_historicals(
         label_cell = worksheet.cell(row=row_idx, column=2)
         label_value = str(label_cell.value or "").strip()
         if "%" in label_value:
+            continue
+        
+        # Skip "Cash Flow Statement" title row - it should not have any values written to it
+        if label_value.lower() == "cash flow statement":
+            continue
+        
+        # Skip Cash Flow section header rows - they should not have any values written to them
+        # Only year headers should be overwritten in these rows
+        cash_flow_section_headers = [
+            "cash flows from operating activities",
+            "cash flows from investing activities",
+            "cash flows from financing activities"
+        ]
+        if any(header in label_value.lower() for header in cash_flow_section_headers):
             continue
         
         # Determine which statement type this role belongs to
