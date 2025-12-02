@@ -5,14 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router-dom";
-import { Check, Users, Crown } from "lucide-react";
+import { Check, Users } from "lucide-react";
 import { useState } from "react";
 
 export default function Solutions() {
-  const [romaEmployees, setRomaEmployees] = useState("5");
-  const [venusUsers, setVenusUsers] = useState("1");
+  const [employees, setEmployees] = useState("5");
+  const [billingPeriod, setBillingPeriod] = useState<"monthly" | "quarterly">("quarterly");
 
-  const romaFeatures = [
+  const features = [
     "Up to 10 employees",
     "Capped monthly usage",
     "By-seat pricing",
@@ -23,16 +23,10 @@ export default function Solutions() {
     "Email Support",
   ];
 
-  const venusFeatures = [
-    "Unlimited usage",
-    "Advanced analytics",
-    "Priority support",
-    "All Roma features",
-    "Custom templates",
-    "API access",
-    "Dedicated account manager",
-    "Training sessions",
-  ];
+  const monthlyPrice = Number(employees) * 99;
+  const quarterlyPrice = 499;
+  const displayPrice = billingPeriod === "quarterly" ? quarterlyPrice : monthlyPrice;
+  const displayPeriod = billingPeriod === "quarterly" ? "quarter" : "month";
 
   return (
     <div className="min-h-screen">
@@ -40,139 +34,78 @@ export default function Solutions() {
 
       <section className="py-16 bg-background">
         <div className="container mx-auto px-4">
-          <div className="max-w-6xl mx-auto">
-            <div className="grid md:grid-cols-2 gap-8">
-              <Card className="shadow-elevated border-2 border-primary/20">
-                <CardHeader>
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="p-2 rounded-lg bg-primary/10">
-                      <Users className="h-6 w-6 text-primary" />
-                    </div>
-                    <CardTitle className="text-2xl">Roma</CardTitle>
+          <div className="max-w-2xl mx-auto">
+            <Card className="shadow-elevated border-2 border-primary/20">
+              <CardHeader>
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2 rounded-lg bg-primary/10">
+                    <Users className="h-6 w-6 text-primary" />
                   </div>
-                  <p className="text-muted-foreground">Perfect for smaller offices and teams</p>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="space-y-4">
-                    <div>
-                      <Label htmlFor="roma-employees">Number of Employees</Label>
-                      <Input
-                        id="roma-employees"
-                        type="number"
-                        min="1"
-                        max="10"
-                        value={romaEmployees}
-                        onChange={(e) => setRomaEmployees(e.target.value)}
-                        className="mt-1"
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">Maximum 10 people</p>
-                    </div>
-
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" className="flex-1">
-                        Monthly
-                      </Button>
-                      <Button variant="outline" size="sm" className="flex-1">
-                        Annual
-                        <Badge variant="secondary" className="ml-2 bg-success text-success-foreground">
-                          Save 20%
-                        </Badge>
-                      </Button>
-                    </div>
-
-                    <div className="bg-muted rounded-lg p-4">
-                      <p className="text-2xl font-bold text-primary">
-                        ${Number(romaEmployees) * 99}
-                        <span className="text-sm font-normal text-muted-foreground">/month</span>
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">$99 per seat/month</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    {romaFeatures.map((feature) => (
-                      <div key={feature} className="flex items-center gap-2">
-                        <Check className="h-4 w-4 text-success flex-shrink-0" />
-                        <span className="text-sm">{feature}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <Button className="w-full bg-primary hover:bg-primary/90">Get Started with Roma</Button>
-                </CardContent>
-              </Card>
-
-              <Card className="shadow-elevated border-2 border-accent/30 relative overflow-hidden">
-                <div className="absolute top-0 right-0 bg-accent text-accent-foreground px-4 py-1 text-xs font-semibold">
-                  PREMIUM
+                  <CardTitle className="text-2xl">Denari Professional</CardTitle>
                 </div>
-                <CardHeader>
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="p-2 rounded-lg bg-accent/10">
-                      <Crown className="h-6 w-6 text-accent" />
-                    </div>
-                    <CardTitle className="text-2xl">Venus</CardTitle>
-                  </div>
-                  <p className="text-muted-foreground">Unlimited power for professionals and individuals</p>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="space-y-4">
-                    <div>
-                      <Label htmlFor="venus-users">Number of Users</Label>
-                      <Input
-                        id="venus-users"
-                        type="number"
-                        min="1"
-                        value={venusUsers}
-                        onChange={(e) => setVenusUsers(e.target.value)}
-                        className="mt-1"
-                      />
-                    </div>
-
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" className="flex-1">
-                        Monthly
-                      </Button>
-                      <Button variant="outline" size="sm" className="flex-1">
-                        Annual
-                        <Badge variant="secondary" className="ml-2 bg-success text-success-foreground">
-                          Save 20%
-                        </Badge>
-                      </Button>
-                    </div>
-
-                    <div className="bg-muted rounded-lg p-4">
-                      <p className="text-2xl font-bold text-accent">
-                        ${Number(venusUsers) * 249}
-                        <span className="text-sm font-normal text-muted-foreground">/month</span>
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">$249 per user/month</p>
-                    </div>
+                <p className="text-muted-foreground">Perfect for smaller offices and teams</p>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="employees">Number of Employees</Label>
+                    <Input
+                      id="employees"
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={employees}
+                      onChange={(e) => setEmployees(e.target.value)}
+                      className="mt-1"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">Maximum 10 people</p>
                   </div>
 
-                  <div className="bg-accent/10 rounded-lg p-4">
-                    <p className="text-sm font-semibold mb-2">Why Choose Venus?</p>
-                    <p className="text-sm text-muted-foreground">
-                      Unlimited model building, advanced features, and dedicated support. Perfect for individuals who
-                      demand the best or teams that need unrestricted access to all Denari capabilities.
+                  <div className="flex gap-2">
+                    <Button 
+                      variant={billingPeriod === "monthly" ? "default" : "outline"} 
+                      size="sm" 
+                      className="flex-1"
+                      onClick={() => setBillingPeriod("monthly")}
+                    >
+                      Monthly
+                    </Button>
+                    <Button 
+                      variant={billingPeriod === "quarterly" ? "default" : "outline"} 
+                      size="sm" 
+                      className="flex-1"
+                      onClick={() => setBillingPeriod("quarterly")}
+                    >
+                      Quarterly
+                    </Button>
+                  </div>
+
+                  <div className="bg-muted rounded-lg p-4">
+                    <p className="text-2xl font-bold text-primary">
+                      ${displayPrice.toLocaleString()}
+                      <span className="text-sm font-normal text-muted-foreground">/{displayPeriod}</span>
                     </p>
+                    {billingPeriod === "monthly" && (
+                      <p className="text-xs text-muted-foreground mt-1">$99 per seat/month</p>
+                    )}
+                    {billingPeriod === "quarterly" && (
+                      <p className="text-xs text-muted-foreground mt-1">$499 per quarter</p>
+                    )}
                   </div>
+                </div>
 
-                  <div className="space-y-3">
-                    {venusFeatures.map((feature) => (
-                      <div key={feature} className="flex items-center gap-2">
-                        <Check className="h-4 w-4 text-success flex-shrink-0" />
-                        <span className="text-sm">{feature}</span>
-                      </div>
-                    ))}
-                  </div>
+                <div className="space-y-3">
+                  {features.map((feature) => (
+                    <div key={feature} className="flex items-center gap-2">
+                      <Check className="h-4 w-4 text-success flex-shrink-0" />
+                      <span className="text-sm">{feature}</span>
+                    </div>
+                  ))}
+                </div>
 
-                  <Button className="w-full bg-accent hover:bg-accent/90 text-accent-foreground">
-                    Get Started with Venus
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
+                <Button className="w-full bg-primary hover:bg-primary/90">Get Started</Button>
+              </CardContent>
+            </Card>
 
             <div className="mt-12 text-center bg-denari-1 rounded-2xl p-8 text-white">
               <h3 className="text-2xl font-bold mb-4">Need a Custom Solution?</h3>
