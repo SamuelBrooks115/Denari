@@ -720,7 +720,12 @@ def extract_single_year_structured(cik: int, ticker: str, edgar_client: Optional
         if statement_currency != "USD":
             break
 
-    # 6) Assemble the full document matching your template
+    # 6) Collect debt facts for transparency and auditing
+    from app.services.ingestion.debt_facts_collector import collect_debt_facts_for_ford
+    logger.info("Collecting debt facts for transparency...")
+    debt_facts = collect_debt_facts_for_ford(facts, periods=[report_date])
+    
+    # 7) Assemble the full document matching your template
     payload: Dict[str, Any] = {
         "company": entity_name,
         "ticker": ticker,
@@ -728,6 +733,9 @@ def extract_single_year_structured(cik: int, ticker: str, edgar_client: Optional
         "statements": consolidated_statements,
         "computed_variables": {},  # Will be populated by generate_structured_output
         "reconciliation": reconciliation,
+        "supporting_facts": {
+            "debt": debt_facts,
+        },
         "metadata": {
             "cik": f"{cik:010d}",
             "ticker": ticker,
@@ -845,7 +853,13 @@ def extract_multi_year_structured(
             }
         )
 
-    # 3) Company-level metadata
+    # 3) Collect debt facts for all periods
+    from app.services.ingestion.debt_facts_collector import collect_debt_facts_for_ford
+    all_periods = [anchor["report_date"] for anchor in anchors]
+    logger.info(f"Collecting debt facts for {len(all_periods)} periods...")
+    debt_facts = collect_debt_facts_for_ford(facts, periods=all_periods)
+    
+    # 4) Company-level metadata
     statement_currency = currency_candidate or "USD"
 
     payload: Dict[str, Any] = {
@@ -857,6 +871,9 @@ def extract_multi_year_structured(
             "us_gaap_taxonomy_year": "",  # not exposed by CompanyFacts; can be filled offline
         },
         "filings": filings_payload,
+        "supporting_facts": {
+            "debt": debt_facts,
+        },
         "comps_config": {
             "peer_selection_rule": {
                 "by_sector_industry": False,

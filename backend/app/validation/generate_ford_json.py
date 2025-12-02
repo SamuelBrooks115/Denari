@@ -27,6 +27,7 @@ from app.services.ingestion.structured_output import (
     extract_single_year_structured,
     generate_structured_output,
 )
+from app.validation.debt_triangulation import triangulate_debt_for_period
 
 # Ford Motor Company constants
 FORD_CIK = 37996
@@ -67,6 +68,27 @@ def generate_ford_json(
             print("  Applying LLM classification...")
             result = generate_structured_output(result)
             
+            # Run debt triangulation
+            print("  Running debt triangulation...")
+            periods = result.get("periods", [])
+            triangulated_debt = {}
+            
+            for period in periods:
+                statements = result.get("statements", {})
+                debt_result = triangulate_debt_for_period(
+                    statements=statements,
+                    period=period,
+                    prev_statements=None,  # Single year, no previous period
+                    prev_period=None,
+                    assumed_interest_rate=0.06,  # 6% default
+                )
+                # Use fiscal year as key for consistency
+                fiscal_year = result.get("metadata", {}).get("fiscal_year", period[:4])
+                period_key = f"FY{fiscal_year}"
+                triangulated_debt[period_key] = debt_result
+            
+            result["triangulated_debt"] = triangulated_debt
+            
             # Extract fiscal year from metadata for filename
             fiscal_year = result.get("metadata", {}).get("fiscal_year", "2024")
             filename = output_dir / f"{FORD_TICKER}_FY{fiscal_year}_single_year_llm_classified.json"
@@ -95,16 +117,75 @@ def generate_ford_json(
             
             # Apply LLM classification to each filing
             print("  Applying LLM classification to each filing...")
-            for filing in result.get("filings", []):
+            filings = result.get("filings", [])
+            triangulated_debt = {}
+            
+            for i, filing in enumerate(filings):
                 # Build a temporary structure for classification
                 temp_structure = {
                     "statements": filing.get("statements", {}),
                 }
                 classified = generate_structured_output(temp_structure)
                 filing["statements"] = classified.get("statements", {})
+                
+                # Run debt triangulation for this filing
+                fiscal_year = filing.get("fiscal_year", "")
+                period_key = f"FY{fiscal_year}" if fiscal_year else f"period_{i}"
+                
+                # Extract period date from balance sheet line items
+                current_period = None
+                statements = filing.get("statements", {})
+                bs = statements.get("balance_sheet", {})
+                line_items = bs.get("line_items", [])
+                if line_items:
+                    # Get first available period from any line item
+                    for item in line_items:
+                        periods = item.get("periods", {})
+                        if periods:
+                            current_period = list(periods.keys())[0]
+                            break
+                
+                # Fallback to fiscal year if no period found
+                if not current_period and fiscal_year:
+                    current_period = f"{fiscal_year}-12-31"
+                
+                # Get previous period statements for roll-forward
+                prev_statements = None
+                prev_period = None
+                if i < len(filings) - 1:
+                    # Previous period is the next filing (filings are latest first)
+                    prev_filing = filings[i + 1]
+                    prev_statements = prev_filing.get("statements", {})
+                    # Extract previous period date
+                    prev_bs = prev_statements.get("balance_sheet", {})
+                    prev_line_items = prev_bs.get("line_items", [])
+                    if prev_line_items:
+                        for item in prev_line_items:
+                            periods = item.get("periods", {})
+                            if periods:
+                                prev_period = list(periods.keys())[0]
+                                break
+                    # Fallback
+                    if not prev_period:
+                        prev_fiscal_year = prev_filing.get("fiscal_year", "")
+                        if prev_fiscal_year:
+                            prev_period = f"{prev_fiscal_year}-12-31"
+                
+                if current_period:
+                    print(f"    Triangulating debt for {period_key} ({current_period})...")
+                    debt_result = triangulate_debt_for_period(
+                        statements=statements,
+                        period=current_period,
+                        prev_statements=prev_statements,
+                        prev_period=prev_period,
+                        assumed_interest_rate=0.06,  # 6% default
+                    )
+                    triangulated_debt[period_key] = debt_result
+            
+            result["triangulated_debt"] = triangulated_debt
             
             # Extract number of filings for filename
-            num_filings = len(result.get("filings", []))
+            num_filings = len(filings)
             filename = output_dir / f"{FORD_TICKER}_multi_year_{num_filings}years_llm_classified.json"
             
             with filename.open('w', encoding='utf-8') as f:

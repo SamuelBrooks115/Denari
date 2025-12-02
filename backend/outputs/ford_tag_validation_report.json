@@ -9,8 +9,8 @@
   },
   "summary": {
     "total_variables": 13,
-    "passed": 12,
-    "failed": 1
+    "passed": 11,
+    "failed": 2
   },
   "results": [
     {
@@ -22,8 +22,8 @@
       "status": "PASS (direct)",
       "reason": "Valid candidate found",
       "chosen": {
-        "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
-        "label": "Revenue from Contract with Customer, Excluding Assessed Tax",
+        "tag": "Revenues",
+        "label": "Revenues",
         "model_role": "IS_REVENUE",
         "matched_role": "IS_REVENUE",
         "confidence": 1.0,
@@ -54,7 +54,7 @@
         "latest_value": 179773000000.0,
         "computation_method": "Revenue - Operating Income",
         "supporting_tags": [
-          "RevenueFromContractWithCustomerExcludingAssessedTax",
+          "Revenues",
           "OperatingIncomeLoss"
         ],
         "source": "computed"
@@ -118,15 +118,15 @@
       "status": "PASS (direct)",
       "reason": "Valid candidate found",
       "chosen": {
-        "tag": "CurrentIncomeTaxExpenseBenefit",
-        "label": "Current Income Tax Expense (Benefit)",
+        "tag": "IncomeTaxExpenseBenefit",
+        "label": "Income Tax Expense (Benefit)",
         "model_role": "IS_TAX_EXPENSE",
         "matched_role": "IS_TAX_EXPENSE",
         "confidence": 1.0,
         "periods_found": [
           "2024-12-31"
         ],
-        "latest_value": 976000000.0
+        "latest_value": 1339000000.0
       },
       "alternates": []
     },
@@ -160,15 +160,15 @@
       "status": "PASS (direct)",
       "reason": "Valid candidate found",
       "chosen": {
-        "tag": "InventoryFinishedGoods",
-        "label": "Inventory, Finished Goods, Gross",
+        "tag": "InventoryNet",
+        "label": "Inventory, Net",
         "model_role": "BS_INVENTORY",
         "matched_role": "BS_INVENTORY",
         "confidence": 1.0,
         "periods_found": [
           "2024-12-31"
         ],
-        "latest_value": 9557000000.0
+        "latest_value": 14951000000.0
       },
       "alternates": []
     },
@@ -283,19 +283,9 @@
       "expected_roles": [
         "CF_DIVIDENDS_PAID"
       ],
-      "status": "PASS (direct)",
-      "reason": "Valid candidate found",
-      "chosen": {
-        "tag": "PaymentsOfDividendsCommonStock",
-        "label": "Payments of Ordinary Dividends, Common Stock",
-        "model_role": "CF_DIVIDENDS_PAID",
-        "matched_role": "CF_DIVIDENDS_PAID",
-        "confidence": 1.0,
-        "periods_found": [
-          "2024-12-31"
-        ],
-        "latest_value": 3118000000.0
-      },
+      "status": "FAIL",
+      "reason": "No candidates found - variable missing or mis-tagged. Note: Need CF_DIVIDENDS_PAID and IS_NET_INCOME",
+      "chosen": null,
       "alternates": []
     }
   ]

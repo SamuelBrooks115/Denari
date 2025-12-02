@@ -681,6 +681,436 @@
     },
     "overall_status": "fail"
   },
+  "supporting_facts": {
+    "debt": [
+      {
+        "tag": "AllowanceForNotesAndLoansReceivableCurrent",
+        "label": "Financing Receivable, Allowance for Credit Loss, Current",
+        "value": 247000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-K",
+        "filing_date": "2025-02-06",
+        "accession": "0000037996-25-000013"
+      },
+      {
+        "tag": "AllowanceForNotesAndLoansReceivableCurrent",
+        "label": "Financing Receivable, Allowance for Credit Loss, Current",
+        "value": 247000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-Q",
+        "filing_date": "2025-05-06",
+        "accession": "0000037996-25-000072"
+      },
+      {
+        "tag": "AllowanceForNotesAndLoansReceivableCurrent",
+        "label": "Financing Receivable, Allowance for Credit Loss, Current",
+        "value": 247000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-Q",
+        "filing_date": "2025-07-31",
+        "accession": "0000037996-25-000147"
+      },
+      {
+        "tag": "AllowanceForNotesAndLoansReceivableCurrent",
+        "label": "Financing Receivable, Allowance for Credit Loss, Current",
+        "value": 247000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-Q",
+        "filing_date": "2025-10-24",
+        "accession": "0000037996-25-000186"
+      },
+      {
+        "tag": "AllowanceForNotesAndLoansReceivableNoncurrent",
+        "label": "Financing Receivable, Allowance for Credit Loss, Noncurrent",
+        "value": 617000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-K",
+        "filing_date": "2025-02-06",
+        "accession": "0000037996-25-000013"
+      },
+      {
+        "tag": "AllowanceForNotesAndLoansReceivableNoncurrent",
+        "label": "Financing Receivable, Allowance for Credit Loss, Noncurrent",
+        "value": 617000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-Q",
+        "filing_date": "2025-05-06",
+        "accession": "0000037996-25-000072"
+      },
+      {
+        "tag": "AllowanceForNotesAndLoansReceivableNoncurrent",
+        "label": "Financing Receivable, Allowance for Credit Loss, Noncurrent",
+        "value": 617000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-Q",
+        "filing_date": "2025-07-31",
+        "accession": "0000037996-25-000147"
+      },
+      {
+        "tag": "AllowanceForNotesAndLoansReceivableNoncurrent",
+        "label": "Financing Receivable, Allowance for Credit Loss, Noncurrent",
+        "value": 617000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-Q",
+        "filing_date": "2025-10-24",
+        "accession": "0000037996-25-000186"
+      },
+      {
+        "tag": "NotesAndLoansReceivableNetCurrent",
+        "label": "Financing Receivable, after Allowance for Credit Loss, Current",
+        "value": 51850000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-K",
+        "filing_date": "2025-02-06",
+        "accession": "0000037996-25-000013"
+      },
+      {
+        "tag": "NotesAndLoansReceivableNetCurrent",
+        "label": "Financing Receivable, after Allowance for Credit Loss, Current",
+        "value": 51850000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-Q",
+        "filing_date": "2025-05-06",
+        "accession": "0000037996-25-000072"
+      },
+      {
+        "tag": "NotesAndLoansReceivableNetCurrent",
+        "label": "Financing Receivable, after Allowance for Credit Loss, Current",
+        "value": 51850000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-Q",
+        "filing_date": "2025-07-31",
+        "accession": "0000037996-25-000147"
+      },
+      {
+        "tag": "NotesAndLoansReceivableNetCurrent",
+        "label": "Financing Receivable, after Allowance for Credit Loss, Current",
+        "value": 51850000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-Q",
+        "filing_date": "2025-10-24",
+        "accession": "0000037996-25-000186"
+      },
+      {
+        "tag": "NotesAndLoansReceivableNetNoncurrent",
+        "label": "Financing Receivable, after Allowance for Credit Loss, Noncurrent",
+        "value": 59786000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-K",
+        "filing_date": "2025-02-06",
+        "accession": "0000037996-25-000013"
+      },
+      {
+        "tag": "NotesAndLoansReceivableNetNoncurrent",
+        "label": "Financing Receivable, after Allowance for Credit Loss, Noncurrent",
+        "value": 59786000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-Q",
+        "filing_date": "2025-05-06",
+        "accession": "0000037996-25-000072"
+      },
+      {
+        "tag": "NotesAndLoansReceivableNetNoncurrent",
+        "label": "Financing Receivable, after Allowance for Credit Loss, Noncurrent",
+        "value": 59786000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-Q",
+        "filing_date": "2025-07-31",
+        "accession": "0000037996-25-000147"
+      },
+      {
+        "tag": "NotesAndLoansReceivableNetNoncurrent",
+        "label": "Financing Receivable, after Allowance for Credit Loss, Noncurrent",
+        "value": 59786000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "instant",
+          "date": "2024-12-31"
+        },
+        "statement": "Balance Sheet",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-Q",
+        "filing_date": "2025-10-24",
+        "accession": "0000037996-25-000186"
+      },
+      {
+        "tag": "PaymentsToAcquireLoansAndLeasesHeldForInvestment",
+        "label": "Payments to Acquire Loans and Leases Held-for-investment",
+        "value": 59720000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "duration",
+          "start": "2024-01-01",
+          "end": "2024-12-31"
+        },
+        "statement": "Cash Flow Statement",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-K",
+        "filing_date": "2025-02-06",
+        "accession": "0000037996-25-000013"
+      },
+      {
+        "tag": "ProceedsFromIssuanceOfLongTermDebt",
+        "label": "Proceeds from Issuance of Long-term Debt",
+        "value": 57312000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "duration",
+          "start": "2024-01-01",
+          "end": "2024-12-31"
+        },
+        "statement": "Cash Flow Statement",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-K",
+        "filing_date": "2025-02-06",
+        "accession": "0000037996-25-000013"
+      },
+      {
+        "tag": "ProceedsFromRepaymentsOfShortTermDebt",
+        "label": "Proceeds from (Repayments of) Short-term Debt",
+        "value": -276000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "duration",
+          "start": "2024-01-01",
+          "end": "2024-12-31"
+        },
+        "statement": "Cash Flow Statement",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-K",
+        "filing_date": "2025-02-06",
+        "accession": "0000037996-25-000013"
+      },
+      {
+        "tag": "ProceedsFromSaleOfAvailableForSaleSecuritiesDebt",
+        "label": "Proceeds from Sale of Debt Securities, Available-for-sale",
+        "value": 11026000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "duration",
+          "start": "2024-01-01",
+          "end": "2024-12-31"
+        },
+        "statement": "Cash Flow Statement",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-K",
+        "filing_date": "2025-02-06",
+        "accession": "0000037996-25-000013"
+      },
+      {
+        "tag": "RepaymentsOfLongTermDebt",
+        "label": "Repayments of Long-term Debt",
+        "value": 45680000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "duration",
+          "start": "2024-01-01",
+          "end": "2024-12-31"
+        },
+        "statement": "Cash Flow Statement",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-K",
+        "filing_date": "2025-02-06",
+        "accession": "0000037996-25-000013"
+      },
+      {
+        "tag": "DebtSecuritiesAvailableForSaleAllowanceForCreditLossPeriodIncreaseDecrease",
+        "label": "Debt Securities, Available-for-sale, Allowance for Credit Loss, Period Increase (Decrease)",
+        "value": 0.0,
+        "unit": "USD",
+        "period": {
+          "type": "duration",
+          "start": "2024-01-01",
+          "end": "2024-12-31"
+        },
+        "statement": "Income Statement",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-K",
+        "filing_date": "2025-02-06",
+        "accession": "0000037996-25-000013"
+      },
+      {
+        "tag": "DebtSecuritiesAvailableForSaleRealizedLoss",
+        "label": "Debt Securities, Available-for-sale, Realized Loss",
+        "value": -28000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "duration",
+          "start": "2024-01-01",
+          "end": "2024-12-31"
+        },
+        "statement": "Income Statement",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-K",
+        "filing_date": "2025-02-06",
+        "accession": "0000037996-25-000013"
+      },
+      {
+        "tag": "OtherComprehensiveIncomeLossAvailableForSaleSecuritiesAdjustmentNetOfTax",
+        "label": "OCI, Debt Securities, Available-for-Sale, Gain (Loss), after Adjustment and Tax",
+        "value": 120000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "duration",
+          "start": "2024-01-01",
+          "end": "2024-12-31"
+        },
+        "statement": "Income Statement",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-K",
+        "filing_date": "2025-02-06",
+        "accession": "0000037996-25-000013"
+      },
+      {
+        "tag": "ProvisionForLoanLeaseAndOtherLosses",
+        "label": "Provision for Loan, Lease, and Other Losses",
+        "value": 575000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "duration",
+          "start": "2024-01-01",
+          "end": "2024-12-31"
+        },
+        "statement": "Income Statement",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-K",
+        "filing_date": "2025-02-06",
+        "accession": "0000037996-25-000013"
+      },
+      {
+        "tag": "DebtSecuritiesAvailableForSaleRealizedGain",
+        "label": "Debt Securities, Available-for-sale, Realized Gain",
+        "value": 17000000.0,
+        "unit": "USD",
+        "period": {
+          "type": "duration",
+          "start": "2024-01-01",
+          "end": "2024-12-31"
+        },
+        "statement": "Unknown",
+        "is_standard_gaap_tag": true,
+        "namespace": "us-gaap",
+        "filing_form": "10-K",
+        "filing_date": "2025-02-06",
+        "accession": "0000037996-25-000013"
+      }
+    ]
+  },
   "metadata": {
     "cik": "0000037996",
     "ticker": "F",
@@ -701,5 +1131,111 @@
     },
     "key_metrics": [],
     "metric_sources": {}
+  },
+  "triangulated_debt": {
+    "FY2024": {
+      "methods": [
+        {
+          "method_name": "direct_sum",
+          "value": null,
+          "components": {
+            "short_term_debt": 0.0,
+            "current_portion_long_term_debt": 0.0,
+            "long_term_debt": 0.0,
+            "finance_lease_liabilities_current": 0.0,
+            "finance_lease_liabilities_noncurrent": 0.0,
+            "other_interest_bearing_liabilities": 0.0
+          },
+          "assumptions": {
+            "description": "Direct sum of explicitly labeled interest-bearing liabilities",
+            "includes": [
+              "short_term_debt",
+              "current_portion_long_term_debt",
+              "long_term_debt",
+              "finance_lease_liabilities_current",
+              "finance_lease_liabilities_noncurrent",
+              "other_interest_bearing_liabilities"
+            ],
+            "excludes": [
+              "accounts_payable",
+              "accrued_expenses",
+              "deferred_revenue",
+              "operating_lease_liabilities",
+              "pension_liabilities"
+            ]
+          },
+          "warnings": [
+            "Missing field: short_term_debt (treated as 0)",
+            "Missing field: current_portion_long_term_debt (treated as 0)",
+            "Missing field: long_term_debt (treated as 0)",
+            "Missing field: finance_lease_liabilities_current (treated as 0)",
+            "Missing field: finance_lease_liabilities_noncurrent (treated as 0)",
+            "Missing field: other_interest_bearing_liabilities (treated as 0)",
+            "No debt components found - all fields missing or zero"
+          ]
+        },
+        {
+          "method_name": "balance_sheet_recon",
+          "value": 216210000000.0,
+          "components": {
+            "total_liabilities": 240338000000.0,
+            "accounts_payable": 0.0,
+            "accrued_expenses": 24128000000.0,
+            "deferred_revenue": 0.0,
+            "income_taxes_payable": 0.0,
+            "other_current_liabilities": 0.0,
+            "operating_lease_liabilities_current": 0.0,
+            "operating_lease_liabilities_noncurrent": 0.0,
+            "pension_liabilities": 0.0
+          },
+          "assumptions": {
+            "description": "Top-down: Total Liabilities - Non-interest-bearing liabilities",
+            "formula": "total_liabilities - sum(non_debt_liabilities)",
+            "non_debt_fields": [
+              "accounts_payable",
+              "accrued_expenses",
+              "accounts_payable_and_accrued",
+              "deferred_revenue",
+              "income_taxes_payable",
+              "other_current_liabilities",
+              "operating_lease_liabilities_current",
+              "operating_lease_liabilities_noncurrent",
+              "pension_liabilities"
+            ]
+          },
+          "warnings": [
+            "Missing non-debt field: accounts_payable (treated as 0)",
+            "Missing non-debt field: deferred_revenue (treated as 0)",
+            "Missing non-debt field: income_taxes_payable (treated as 0)",
+            "Missing non-debt field: other_current_liabilities (treated as 0)",
+            "Missing non-debt field: operating_lease_liabilities_current (treated as 0)",
+            "Missing non-debt field: operating_lease_liabilities_noncurrent (treated as 0)",
+            "Missing non-debt field: pension_liabilities (treated as 0)",
+            "Excluded combined AP+Accrued to avoid double-counting with separate fields"
+          ]
+        },
+        {
+          "method_name": "interest_implied",
+          "value": null,
+          "components": {},
+          "assumptions": {
+            "description": "Implied: Interest Expense / Assumed Interest Rate"
+          },
+          "warnings": [
+            "interest_expense not found in income statement"
+          ]
+        }
+      ],
+      "summary": {
+        "min": 216210000000.0,
+        "max": 216210000000.0,
+        "median": 216210000000.0,
+        "average": 216210000000.0,
+        "recommended_value": 216210000000.0,
+        "recommended_basis": "median_of_non_null_methods",
+        "method_count": 1,
+        "total_methods": 3
+      }
+    }
   }
 }
