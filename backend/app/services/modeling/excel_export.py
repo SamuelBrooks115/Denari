@@ -35,7 +35,7 @@ from io import BytesIO
 import json
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -539,56 +539,140 @@ def populate_historicals(
                 target_cell.value = value
 
 
+def _get_current_stock_price(ticker: str, use_fake_data: bool = False) -> Tuple[Optional[float], Optional[str]]:
+    """
+    Get current stock price and as-of date.
+    
+    Args:
+        ticker: Stock ticker symbol (e.g., "AAPL")
+        use_fake_data: If True, returns fake pricing data instead of fetching from yfinance
+    
+    Returns:
+        Tuple of (price, as_of_date) or (None, None) if error
+        as_of_date is in MM/DD/YYYY format
+    """
+    from datetime import date
+    
+    if use_fake_data:
+        # Return fake pricing data for testing
+        fake_price = 150.00  # Fake price
+        price_date = date.today()
+        as_of_date = price_date.strftime("%m/%d/%Y")
+        logger.info(f"Using fake pricing data for {ticker}: ${fake_price:.2f}")
+        return fake_price, as_of_date
+    
+    try:
+        import yfinance as yf
+        
+        ticker_obj = yf.Ticker(ticker)
+        # Get latest info - use info for current price
+        info = ticker_obj.info
+        
+        # Try to get current price from info
+        current_price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose")
+        
+        if current_price is None:
+            # Fallback: get from history
+            hist = ticker_obj.history(period="1d")
+            if not hist.empty:
+                current_price = float(hist["Close"].iloc[-1])
+                price_date = hist.index[-1].date() if hasattr(hist.index[-1], 'date') else date.today()
+            else:
+                logger.warning(f"Could not fetch price for ticker {ticker}")
+                return None, None
+        else:
+            # Use today's date for info-based price
+            price_date = date.today()
+        
+        # Format date as MM/DD/YYYY
+        as_of_date = price_date.strftime("%m/%d/%Y")
+        
+        return float(current_price), as_of_date
+    except Exception as e:
+        logger.warning(f"Error fetching stock price for {ticker}: {e}")
+        return None, None
+
+
 def populate_cover_sheet(
     workbook,
     company_name: str,
     ticker: str,
-    date: Optional[str] = None
+    date: Optional[str] = None,
+    use_fake_pricing: bool = False
 ) -> None:
     """
-    Populate cover sheet with company information.
+    Populate both Cover sheet and Summary sheet with company information.
     
-    Writes:
-    - Company name to B3
-    - Ticker to B4
-    - Date to B5 (defaults to current date if not provided)
+    Cover Sheet writes:
+    - Company name to B2
+    - Ticker to B3
+    - Date to B4 (defaults to current date if not provided)
+    
+    Summary Sheet writes:
+    - Company name to B2
+    - Ticker to C3
+    - Current stock price to C4
+    - As-of date for pricing data to D3
     
     Args:
         workbook: openpyxl Workbook object
         company_name: Company name to write
         ticker: Ticker symbol to write
         date: Optional date string (defaults to current date in MM/DD/YYYY format)
+        use_fake_pricing: If True, uses fake pricing data instead of fetching from yfinance
     """
-    # Find cover sheet - common names: "Cover", "Cover Sheet", "Summary", or first sheet
+    # Populate Cover sheet
     cover_sheet = None
-    cover_sheet_names = ["Cover", "Cover Sheet", "Summary", "Cover Page"]
+    if "Cover" in workbook.sheetnames:
+        cover_sheet = workbook["Cover"]
+    elif "Cover Sheet" in workbook.sheetnames:
+        cover_sheet = workbook["Cover Sheet"]
+    elif "Cover Page" in workbook.sheetnames:
+        cover_sheet = workbook["Cover Page"]
     
-    for sheet_name in cover_sheet_names:
-        if sheet_name in workbook.sheetnames:
-            cover_sheet = workbook[sheet_name]
-            break
+    if cover_sheet:
+        # Write company name to B2 (row 2, column 2)
+        cover_sheet.cell(row=2, column=2).value = company_name
+        
+        # Write ticker to B3 (row 3, column 2)
+        cover_sheet.cell(row=3, column=2).value = ticker
+        
+        # Write date to B4 (row 4, column 2)
+        if date is None:
+            date = datetime.now().strftime("%m/%d/%Y")
+        cover_sheet.cell(row=4, column=2).value = date
+        
+        logger.info(f"Populated Cover sheet: Company={company_name}, Ticker={ticker}, Date={date}")
+    else:
+        logger.warning("Cover sheet not found, skipping Cover sheet population")
     
-    # If no cover sheet found, try the first sheet
-    if cover_sheet is None and workbook.sheetnames:
-        cover_sheet = workbook[workbook.sheetnames[0]]
-        logger.warning(f"No cover sheet found with standard names, using first sheet: {workbook.sheetnames[0]}")
+    # Populate Summary sheet
+    summary_sheet = None
+    if "Summary" in workbook.sheetnames:
+        summary_sheet = workbook["Summary"]
     
-    if cover_sheet is None:
-        logger.warning("No sheets found in workbook, skipping cover sheet population")
-        return
-    
-    # Write company name to B3 (row 3, column 2)
-    cover_sheet.cell(row=3, column=2).value = company_name
-    
-    # Write ticker to B4 (row 4, column 2)
-    cover_sheet.cell(row=4, column=2).value = ticker
-    
-    # Write date to B5 (row 5, column 2)
-    if date is None:
-        date = datetime.now().strftime("%m/%d/%Y")
-    cover_sheet.cell(row=5, column=2).value = date
-    
-    logger.info(f"Populated cover sheet: Company={company_name}, Ticker={ticker}, Date={date}")
+    if summary_sheet:
+        # Write company name to B2 (row 2, column 2)
+        summary_sheet.cell(row=2, column=2).value = company_name
+        
+        # Write ticker to C3 (row 3, column 3)
+        summary_sheet.cell(row=3, column=3).value = ticker
+        
+        # Get current stock price (fake or real)
+        current_price, as_of_date = _get_current_stock_price(ticker, use_fake_data=use_fake_pricing)
+        
+        if current_price is not None:
+            # Write current stock price to C4 (row 4, column 3)
+            summary_sheet.cell(row=4, column=3).value = current_price
+            
+            # Write as-of date to D3 (row 3, column 4)
+            summary_sheet.cell(row=3, column=4).value = as_of_date
+            
+            logger.info(f"Populated Summary sheet: Company={company_name}, Ticker={ticker}, Price=${current_price:.2f}, As-of={as_of_date}")
+        else:
+            logger.warning(f"Populated Summary sheet: Company={company_name}, Ticker={ticker}, but could not get stock price")
+    else:
+        logger.warning("Summary sheet not found, skipping Summary sheet population")
 
 
 def populate_three_statement_assumptions(
@@ -1668,14 +1752,16 @@ def populate_template_from_json(
     logger.info(f"Loading Excel template from {template_path}")
     workbook = load_excel_template(template_path)
     
-    # Step 3.5: Populate cover sheet
+    # Step 3.5: Populate cover sheet and summary sheet
     company_info = json_data.get("company", {})
     company_name = company_info.get("company_name", "").strip()
     ticker = company_info.get("ticker", "").strip()
     
     if company_name and ticker:
-        logger.info("Populating cover sheet")
-        populate_cover_sheet(workbook, company_name, ticker)
+        logger.info("Populating cover sheet and summary sheet")
+        # Use fake pricing for dummy/test data
+        use_fake_pricing = ticker.upper() in ["DUMMY", "TEST", "FAKE"]
+        populate_cover_sheet(workbook, company_name, ticker, use_fake_pricing=use_fake_pricing)
     else:
         logger.warning(f"Missing company info (name={company_name}, ticker={ticker}), skipping cover sheet")
     
@@ -1850,9 +1936,11 @@ def export_full_model_to_excel(
     logger.info(f"Loading Excel template from {template_path}")
     workbook = load_excel_template(template_path)
     
-    # Step 4.5: Populate cover sheet
-    logger.info("Populating cover sheet")
-    populate_cover_sheet(workbook, model_input.name, model_input.ticker)
+    # Step 4.5: Populate cover sheet and summary sheet
+    logger.info("Populating cover sheet and summary sheet")
+    # Use fake pricing for dummy/test data
+    use_fake_pricing = model_input.ticker.upper() in ["DUMMY", "TEST", "FAKE"]
+    populate_cover_sheet(workbook, model_input.name, model_input.ticker, use_fake_pricing=use_fake_pricing)
     
     # Step 5: Process DCF A and 3-STMT A sheets
     target_sheets = ["DCF A", "3-STMT A"]
