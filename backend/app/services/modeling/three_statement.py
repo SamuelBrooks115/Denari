@@ -7,38 +7,28 @@ Purpose:
     * Balance Sheet (minimal for MVP)
     * Cash Flow Statement (Free Cash Flow focus)
 
-Inputs (MVP - no database):
-- historical_financials: Dict[str, Dict[str, float]] - financial data by period_end
-- assumptions: Dict[str, Any] - growth rates, margins, etc.
-- forecast_periods: int - number of periods to project
-
-Outputs:
-- Structured JSON tables usable by:
-    * DCF valuation
-    * Excel export layer
-    * UI model visualization
-
-This module does NOT:
-- Calculate valuation directly (DCF does that).
-- Query market data.
+This module is unit-testable without Excel and uses structured dataclass outputs.
 """
 
 from typing import Dict, Any, List
-from datetime import datetime
+
+from app.services.modeling.types import (
+    CompanyModelInput,
+    ThreeStatementOutput,
+)
 
 
 def run_three_statement(
-    historical_financials: Dict[str, Dict[str, float]],
+    model_input: CompanyModelInput,
     assumptions: Dict[str, Any],
     forecast_periods: int = 5,
     frequency: str = "annual",
-) -> Dict[str, Any]:
+) -> ThreeStatementOutput:
     """
     Main entrypoint for generating forward projections (MVP - no database).
 
     Args:
-        historical_financials: Dict mapping period_end (YYYY-MM-DD) to financial metrics
-            Expected keys: "revenue", "cogs", "operating_expense", "net_income", etc.
+        model_input: CompanyModelInput with historical financial data
         assumptions: Dict with keys:
             - revenue_growth: float (annual growth rate, e.g., 0.08 for 8%)
             - operating_margin_target: float (target operating margin)
@@ -49,27 +39,28 @@ def run_three_statement(
         frequency: "annual" or "quarterly"
 
     Returns:
-        Dictionary with projections:
-        {
-          "periods": [str, ...],  # Period end dates
-          "revenue": [float, ...],
-          "cogs": [float, ...],
-          "gross_profit": [float, ...],
-          "operating_expense": [float, ...],
-          "operating_income": [float, ...],
-          "net_income": [float, ...],
-          "free_cash_flow": [float, ...],
-          "capex": [float, ...],
-        }
+        ThreeStatementOutput with IS/BS/CF projections
     """
-    # Extract historical data
-    periods = sorted(historical_financials.keys())
-    if not periods:
+    # Extract historical data from CompanyModelInput
+    historicals = model_input.historicals.by_role
+    
+    # Find the latest year with data
+    all_years = set()
+    for role_values in historicals.values():
+        all_years.update(role_values.keys())
+    
+    if not all_years:
         raise ValueError("No historical financial data provided")
-
-    # Get latest period as baseline
-    latest_period = periods[-1]
-    latest_data = historical_financials[latest_period]
+    
+    latest_year = max(all_years)
+    
+    # Extract latest year values by model_role
+    latest_revenue = historicals.get("IS_REVENUE", {}).get(latest_year, 0.0)
+    latest_cogs = historicals.get("IS_COGS", {}).get(latest_year, 0.0)
+    latest_opex = historicals.get("IS_OPERATING_EXPENSE", {}).get(latest_year, 0.0)
+    latest_net_income = historicals.get("IS_NET_INCOME", {}).get(latest_year, 0.0)
+    latest_capex = historicals.get("CF_CAPEX", {}).get(latest_year, 0.0)
+    latest_depreciation = historicals.get("CF_DEPRECIATION", {}).get(latest_year, 0.0)
 
     # Extract assumptions with defaults
     revenue_growth = assumptions.get("revenue_growth", 0.05)  # 5% default
@@ -78,8 +69,7 @@ def run_three_statement(
     capex_as_pct_revenue = assumptions.get("capex_as_pct_revenue", 0.05)  # 5% default
     depreciation_as_pct_revenue = assumptions.get("depreciation_as_pct_revenue", 0.03)  # 3% default
 
-    # Calculate historical margins for reference
-    latest_revenue = latest_data.get("revenue", 0.0)
+    # Validate latest revenue
     if latest_revenue <= 0:
         raise ValueError("Latest period revenue is missing or zero")
 
@@ -95,17 +85,13 @@ def run_three_statement(
     depreciation_proj: List[float] = []
     fcf_proj: List[float] = []
 
-    # Calculate historical COGS margin
-    latest_cogs = latest_data.get("cogs", 0.0)
+    # Calculate historical margins
     cogs_margin = latest_cogs / latest_revenue if latest_revenue > 0 else 0.0
-
-    # Calculate historical operating expense margin
-    latest_opex = latest_data.get("operating_expense", 0.0)
     opex_margin = latest_opex / latest_revenue if latest_revenue > 0 else 0.0
 
-    # Start projection from latest period
+    # Start projection from latest year
     current_revenue = latest_revenue
-    base_year = int(latest_period.split("-")[0])
+    base_year = latest_year
 
     for i in range(forecast_periods):
         # Calculate next period date
@@ -164,15 +150,15 @@ def run_three_statement(
         fcf = net_income + depreciation - capex
         fcf_proj.append(fcf)
 
-    return {
-        "periods": projected_periods,
-        "revenue": revenue_proj,
-        "cogs": cogs_proj,
-        "gross_profit": gross_profit_proj,
-        "operating_expense": operating_expense_proj,
-        "operating_income": operating_income_proj,
-        "net_income": net_income_proj,
-        "capex": capex_proj,
-        "depreciation": depreciation_proj,
-        "free_cash_flow": fcf_proj,
-    }
+    return ThreeStatementOutput(
+        periods=projected_periods,
+        revenue=revenue_proj,
+        cogs=cogs_proj,
+        gross_profit=gross_profit_proj,
+        operating_expense=operating_expense_proj,
+        operating_income=operating_income_proj,
+        net_income=net_income_proj,
+        capex=capex_proj,
+        depreciation=depreciation_proj,
+        free_cash_flow=fcf_proj,
+    )

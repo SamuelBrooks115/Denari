@@ -94,6 +94,105 @@ def get_latest_price_date(company_id: int, db: Session) -> Optional[date]:
     return latest_date
 
 
+def fetch_latest_price(ticker: str) -> dict:
+    """
+    Fetch the most recent available price data from Yahoo Finance.
+    
+    Args:
+        ticker: Stock ticker symbol (e.g., "AAPL")
+    
+    Returns:
+        Dict with the most recent price data:
+        {
+            "date": date,
+            "close": float,
+            "open": float|None,
+            "high": float|None,
+            "low": float|None,
+            "volume": float|None,
+            "adj_close": float|None,
+            "as_of": date  # The date of this price data
+        }
+        Returns empty dict if no data available.
+    
+    Raises:
+        YahooFinanceTickerError: If ticker is invalid or no data available
+        YahooFinanceNetworkError: If network/connection errors occur
+        YahooFinanceError: For other Yahoo Finance errors
+    """
+    today = date.today()
+    
+    # Fetch a wider range (30 days) to find the most recent trading day
+    # This ensures we capture the newest data even if markets were closed recently
+    from_date = today - timedelta(days=30)
+    from_date, to_date = _validate_and_clamp_dates(from_date, today)
+    
+    try:
+        # Create yfinance Ticker object
+        ticker_obj = yf.Ticker(ticker)
+        
+        # Fetch historical data
+        hist = ticker_obj.history(start=from_date, end=to_date)
+        
+        # Check if DataFrame is empty
+        if hist.empty:
+            error_msg = f"No price data available for ticker {ticker}"
+            logger.warning(error_msg)
+            raise YahooFinanceTickerError(error_msg)
+        
+        # Get the most recent row (last row in DataFrame)
+        most_recent_row = hist.iloc[-1]
+        most_recent_date = hist.index[-1]
+        
+        # Convert date index to date object
+        if isinstance(most_recent_date, pd.Timestamp):
+            price_date = most_recent_date.date()
+        elif hasattr(most_recent_date, 'date'):
+            price_date = most_recent_date.date()
+        else:
+            error_msg = f"Unexpected date index type for {ticker}: {type(most_recent_date)}"
+            logger.error(error_msg)
+            raise YahooFinanceError(error_msg)
+        
+        # Extract OHLCV data
+        open_val = most_recent_row.get("Open")
+        high_val = most_recent_row.get("High")
+        low_val = most_recent_row.get("Low")
+        close_val = most_recent_row.get("Close")
+        adj_close_val = most_recent_row.get("Adj Close") if "Adj Close" in most_recent_row else close_val
+        volume_val = most_recent_row.get("Volume")
+        
+        # Build result dict with as_of date
+        latest_price = {
+            "date": price_date,
+            "open": float(open_val) if pd.notna(open_val) else None,
+            "high": float(high_val) if pd.notna(high_val) else None,
+            "low": float(low_val) if pd.notna(low_val) else None,
+            "close": float(close_val) if pd.notna(close_val) else 0.0,
+            "adj_close": float(adj_close_val) if pd.notna(adj_close_val) else None,
+            "volume": float(volume_val) if pd.notna(volume_val) else None,
+            "as_of": price_date,  # Pricing data as of this date
+        }
+        
+        logger.info("Fetched latest price for %s: $%.2f as of %s", ticker, latest_price["close"], price_date)
+        return latest_price
+        
+    except YahooFinanceTickerError:
+        # Re-raise ticker errors
+        raise
+    except Exception as e:
+        # Check if it's a network-related error
+        error_str = str(e).lower()
+        if any(keyword in error_str for keyword in ["network", "connection", "timeout", "dns", "resolve"]):
+            error_msg = f"Network error fetching Yahoo Finance data for {ticker}: {str(e)}"
+            logger.error(error_msg)
+            raise YahooFinanceNetworkError(error_msg) from e
+        else:
+            error_msg = f"Error fetching Yahoo Finance data for {ticker}: {str(e)}"
+            logger.error(error_msg)
+            raise YahooFinanceError(error_msg) from e
+
+
 def fetch_prices_from_vendor(ticker: str, start_date: Optional[date]) -> list[dict]:
     """
     Fetch price bars from Yahoo Finance.
@@ -107,7 +206,8 @@ def fetch_prices_from_vendor(ticker: str, start_date: Optional[date]) -> list[di
         List of dicts with price data:
         [
             {"date": date, "close": float, "open": float|None, "high": float|None,
-             "low": float|None, "volume": float|None, "adj_close": float|None},
+             "low": float|None, "volume": float|None, "adj_close": float|None,
+             "as_of": date},
             ...
         ]
         Returns empty list if no data available or on non-critical errors.
@@ -183,6 +283,7 @@ def fetch_prices_from_vendor(ticker: str, start_date: Optional[date]) -> list[di
                 "close": float(close_val) if pd.notna(close_val) else 0.0,
                 "adj_close": float(adj_close_val) if pd.notna(adj_close_val) else None,
                 "volume": float(volume_val) if pd.notna(volume_val) else None,
+                "as_of": price_date,  # Pricing data as of this date
             }
             price_bars.append(price_bar)
 
