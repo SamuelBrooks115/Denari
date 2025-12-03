@@ -141,6 +141,26 @@ class Settings(BaseSettings):
         description="Maximum retry attempts for LLM API calls",
     )
 
+    # Database Configuration (Supabase)
+    SUPABASE_DB_URL: str = Field(
+        "",
+        description="PostgreSQL connection URL for Supabase database",
+    )
+    SUPABASE_URL: str = Field(
+        "",
+        description="Supabase project URL",
+    )
+    SUPABASE_SERVICE_ROLE_KEY: str = Field(
+        "",
+        description="Supabase service role key for admin access",
+    )
+
+    # S&P 500 Ticker Source
+    SP500_TICKER_SOURCE: str = Field(
+        "",
+        description="Path or URL to S&P 500 ticker list (CSV or JSON)",
+    )
+
     model_config = SettingsConfigDict(
         env_file=_ENV_FILE_PATH,
         env_file_encoding="utf-8",

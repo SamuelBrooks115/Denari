@@ -8,41 +8,28 @@ Purpose:
 - Add Terminal Value (TV)
 - Return enterprise value (EV), and optionally equity value/share price
 
-Inputs (MVP - no database):
-- projections: Dict from run_three_statement() containing free_cash_flow array
-- assumptions: Dict with WACC, terminal_growth_rate, etc.
-
-Outputs (JSON-serializable):
-{
-  "fcf": [...],           # projected free cash flows
-  "discount_factors": [...],
-  "pv_fcf": [...],
-  "terminal_value": float,
-  "pv_terminal_value": float,
-  "enterprise_value": float,
-  "equity_value": float | None,
-  "implied_share_price": float | None
-}
-
-This module does NOT:
-- Pull historicals directly
-- Produce Excel output
+This module is unit-testable without Excel and uses structured dataclass outputs.
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+
+from app.services.modeling.types import (
+    ThreeStatementOutput,
+    DcfOutput,
+    DcfYearResult,
+    Year,
+)
 
 
 def run_dcf(
-    projections: Dict[str, Any],
+    projections: ThreeStatementOutput,
     assumptions: Dict[str, Any],
-) -> Dict[str, Any]:
+) -> DcfOutput:
     """
     Main entrypoint for DCF valuation (MVP - no database).
 
     Args:
-        projections: Output from run_three_statement() containing:
-            - free_cash_flow: List[float]
-            - periods: List[str]
+        projections: ThreeStatementOutput from run_three_statement()
         assumptions: Dict with keys:
             - wacc: float (weighted average cost of capital, e.g., 0.10 for 10%)
             - terminal_growth_rate: float (perpetual growth rate, e.g., 0.025 for 2.5%)
@@ -51,10 +38,10 @@ def run_dcf(
             - cash: float | None (for equity value calculation)
 
     Returns:
-        Dictionary with DCF valuation results
+        DcfOutput with yearly results and valuation metrics
     """
-    fcf_list = projections.get("free_cash_flow", [])
-    periods = projections.get("periods", [])
+    fcf_list = projections.free_cash_flow
+    periods = projections.periods
     
     if not fcf_list:
         raise ValueError("No free cash flow projections provided")
@@ -73,17 +60,29 @@ def run_dcf(
         raise ValueError("Terminal growth rate must be less than WACC")
 
     # Step 1: Calculate present value of each projected FCF
-    pv_fcf: List[float] = []
-    discount_factors: List[float] = []
+    yearly_results: List[DcfYearResult] = []
     
     for i, fcf in enumerate(fcf_list):
+        # Extract year from period string (YYYY-MM-DD format)
+        period_str = periods[i] if i < len(periods) else f"Year{i+1}"
+        try:
+            year = int(period_str.split("-")[0])
+        except (ValueError, IndexError):
+            # Fallback: use sequential year numbering
+            year = 2024 + i + 1
+        
         # Discount factor: 1 / (1 + WACC)^(period_number)
         # Period 1 is discounted by 1 year, period 2 by 2 years, etc.
         discount_factor = 1.0 / ((1 + wacc) ** (i + 1))
-        discount_factors.append(discount_factor)
         
-        pv = fcf * discount_factor
-        pv_fcf.append(pv)
+        pv_ufcf = fcf * discount_factor
+        
+        yearly_results.append(DcfYearResult(
+            year=year,
+            ufcf=fcf,
+            discount_factor=discount_factor,
+            pv_ufcf=pv_ufcf
+        ))
 
     # Step 2: Calculate Terminal Value
     # Using Gordon Growth Model: TV = FCF[last] * (1 + g) / (WACC - g)
@@ -96,12 +95,13 @@ def run_dcf(
     pv_terminal_value = terminal_value / ((1 + wacc) ** num_periods)
 
     # Step 4: Calculate Enterprise Value
-    # EV = Sum of PV(FCF) + PV(Terminal Value)
-    enterprise_value = sum(pv_fcf) + pv_terminal_value
+    # EV = Sum of PV(UFCF) + PV(Terminal Value)
+    pv_fcf_sum = sum(result.pv_ufcf for result in yearly_results)
+    enterprise_value = pv_fcf_sum + pv_terminal_value
 
     # Step 5: Calculate Equity Value (if balance sheet data available)
-    equity_value = None
-    implied_share_price = None
+    equity_value: Optional[float] = None
+    implied_share_price: Optional[float] = None
     
     if shares_outstanding is not None:
         # Equity Value = Enterprise Value - Debt + Cash
@@ -111,15 +111,13 @@ def run_dcf(
         if shares_outstanding > 0:
             implied_share_price = equity_value / shares_outstanding
 
-    return {
-        "fcf": fcf_list,
-        "discount_factors": discount_factors,
-        "pv_fcf": pv_fcf,
-        "terminal_value": terminal_value,
-        "pv_terminal_value": pv_terminal_value,
-        "enterprise_value": enterprise_value,
-        "equity_value": equity_value,
-        "implied_share_price": implied_share_price,
-        "wacc": wacc,
-        "terminal_growth_rate": terminal_growth,
-    }
+    return DcfOutput(
+        yearly_results=yearly_results,
+        terminal_value=terminal_value,
+        pv_terminal_value=pv_terminal_value,
+        enterprise_value=enterprise_value,
+        equity_value=equity_value,
+        implied_share_price=implied_share_price,
+        wacc=wacc,
+        terminal_growth_rate=terminal_growth,
+    )
