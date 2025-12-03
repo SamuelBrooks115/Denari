@@ -2075,8 +2075,9 @@ def populate_cover_sheet(
         cover_sheet = workbook["Cover Page"]
     
     if cover_sheet:
-        # Write company name to B2 (row 2, column 2)
+        # Write company name to B2 (row 2, column 2) - always overwrite
         cover_sheet.cell(row=2, column=2).value = company_name
+        logger.debug(f"Wrote company name '{company_name}' to Cover Sheet B2")
         
         # Write ticker to B3 (row 3, column 2)
         cover_sheet.cell(row=3, column=2).value = ticker
@@ -2096,8 +2097,9 @@ def populate_cover_sheet(
         summary_sheet = workbook["Summary"]
     
     if summary_sheet:
-        # Write company name to B2 (row 2, column 2)
+        # Write company name to B2 (row 2, column 2) - always overwrite
         summary_sheet.cell(row=2, column=2).value = company_name
+        logger.debug(f"Wrote company name '{company_name}' to Summary Sheet B2")
         
         # Write ticker to C3 (row 3, column 3)
         summary_sheet.cell(row=3, column=3).value = ticker
@@ -3944,7 +3946,19 @@ def export_full_model_to_excel(
     logger.info("Populating DCF year headers")
     populate_dcf_year_headers(workbook, years_list, forecast_periods=3)
     
-    # Step 4.6: Extract line items from JSON for 3-statement sheet
+    # Step 4.6: Populate DCF sheet titles (B2) for all DCF sheets
+    logger.info("Populating DCF sheet titles")
+    dcf_sheets = ["DCF Base", "DCF Bear", "DCF Bull"]
+    for sheet_name in dcf_sheets:
+        if sheet_name in workbook.sheetnames:
+            worksheet = workbook[sheet_name]
+            title_cell = worksheet.cell(row=2, column=2)  # Cell B2
+            title_cell.value = f"{model_input.name} DCF Analysis"
+            logger.debug(f"Wrote '{model_input.name} DCF Analysis' to {sheet_name} B2")
+        else:
+            logger.debug(f"DCF sheet '{sheet_name}' not found, skipping B2 population")
+    
+    # Step 4.7: Extract line items from JSON for 3-statement sheet
     logger.info("Extracting line items from JSON")
     line_items = extract_line_items_from_json(json_data)
     logger.info(f"Extracted {len(line_items)} line items")
@@ -3965,13 +3979,13 @@ def export_full_model_to_excel(
             add_model_role_column(worksheet, role_column="ZZ")
             logger.info("Processing 3 Statement sheet")
             
-            # Set sheet title: "Company Name 3 Statement Model (UNITS)"
+            # Set sheet title: "Company Name 3 Statement Model (millions)"
             if model_input.name:
                 title_cell = worksheet.cell(row=2, column=2)  # Cell B2
-                title_cell.value = f"{model_input.name} 3 Statement Model (UNITS)"
+                title_cell.value = f"{model_input.name} 3 Statement Model (millions)"
                 if Font:
                     title_cell.font = Font(bold=True, size=14)
-                logger.info(f"Set sheet title to: {model_input.name} 3 Statement Model (UNITS)")
+                logger.info(f"Set sheet title to: {model_input.name} 3 Statement Model (millions)")
             
             # Detect historical columns from Income Statement row 4 (where Year"A" placeholders are)
             # Check row 4 for Year"A" placeholders (Income Statement header row)
@@ -4013,6 +4027,11 @@ def export_full_model_to_excel(
                 line_items=line_items
             )
             logger.info(f"Populated 3-statement historicals for sheet '{sheet_name}'")
+            
+            # Populate assumptions table if assumptions provided
+            if assumptions_data and assumptions_data.get("assumptions"):
+                logger.info("Populating 3-statement assumptions table")
+                populate_three_statement_assumptions_table(worksheet, assumptions_data)
         elif sheet_name == "DCF Base":
             # For DCF Base sheet, only year headers are populated (already done in Step 4.5)
             # Skip historical data and WACC/assumptions population
@@ -4189,6 +4208,325 @@ def populate_wacc_and_assumptions(
         if cell_j9.value is None or str(cell_j9.value).strip() == "#":
             cell_j9.value = current_price
             logger.debug(f"Wrote Current Price = {current_price} to row 9, column J")
+
+
+def populate_three_statement_assumptions_table(
+    worksheet,
+    assumptions: Dict[str, Any]
+) -> None:
+    """
+    Populate assumptions tables in 3 Statement sheet.
+    
+    Income Statement Assumptions (M4-S10):
+    - Title "Assumptions" to M4
+    - Row labels to M5-M10: Revenue, Gross Margin, Operating Margin, EBITDA Margin, Tax Rate, Interest Rate of Debt
+    - Types to N5-N10: step, constant, or custom
+    - Values to O5-S10: 5 period values for each assumption
+    
+<｜tool▁sep｜>new_string
+    Balance Sheet Assumptions (M25-S27):
+    - Row labels to M25-M27: Depreciation % of PPE, Inventory % Sales, Long Term Debt Change
+    - Types to N25-N27: step, constant, or custom
+    - Values to O25-S27: 5 period values for each assumption
+    
+    Cash Flow Assumptions (M72-S74):
+    - Row labels to M72-M74: Share Repurchases, Dividends as a % of Net Income, CAPEX
+    - Types to N72-N74: step, constant, or custom
+    - Values to O72-S74: 5 period values for each assumption
+    
+    Args:
+        worksheet: openpyxl Worksheet object for "3 Statement" sheet
+        assumptions: Dict containing assumptions data from JSON:
+            {
+                "assumptions": {
+                    "revenue": {"type": "step", "values": [0.05, 0.06, ...]},
+                    "gross_margin": {"type": "constant", "values": [0.40, ...]},
+                    ...
+                },
+                "balance_sheet": {
+                    "depreciation_ppe": {"type": "constant", "values": [0.10, ...]},
+                    "inventory_sales": {"type": "step", "values": [0.15, ...]},
+                    "lt_debt_change": {"type": "custom", "values": [0.05, ...]}
+                },
+                "cash_flow": {
+                    "share_repurchases": {"type": "step", "values": [1000000, ...]},
+                    "dividends_ni": {"type": "constant", "values": [0.30, ...]},
+                    "capex": {"type": "custom", "values": [5000000, ...]}
+                }
+            }
+    """
+    assumptions_data = assumptions.get("assumptions")
+    if not assumptions_data:
+        logger.warning("No assumptions data found, skipping assumptions table population")
+        return
+    
+    # Column mappings
+    COL_M = 13  # Row labels
+    COL_N = 14  # Types
+    COL_O = 15  # Period 1
+    COL_P = 16  # Period 2
+    COL_Q = 17  # Period 3
+    COL_R = 18  # Period 4
+    COL_S = 19  # Period 5
+    
+    # Row mappings
+    ROW_TITLE = 4
+    ROW_REVENUE = 5
+    ROW_GROSS_MARGIN = 6
+    ROW_OPERATING_MARGIN = 7
+    ROW_EBITDA_MARGIN = 8
+    ROW_TAX_RATE = 9
+    ROW_INTEREST_RATE_DEBT = 10
+    
+    # Assumption mapping: key name -> (row, display_name)
+    assumption_map = {
+        "revenue": (ROW_REVENUE, "Revenue"),
+        "gross_margin": (ROW_GROSS_MARGIN, "Gross Margin"),
+        "operating_margin": (ROW_OPERATING_MARGIN, "Operating Margin"),
+        "ebitda_margin": (ROW_EBITDA_MARGIN, "EBITDA Margin"),
+        "tax_rate": (ROW_TAX_RATE, "Tax Rate"),
+        "interest_rate_debt": (ROW_INTEREST_RATE_DEBT, "Interest Rate of Debt"),
+    }
+    
+    # Write title to M4
+    title_cell = worksheet.cell(row=ROW_TITLE, column=COL_M)
+    if title_cell.value is None or str(title_cell.value).strip() == "":
+        title_cell.value = "Assumptions"
+        logger.debug(f"Wrote title 'Assumptions' to M{ROW_TITLE}")
+    
+    # Write row labels, types, and values
+    for key, (row_num, display_name) in assumption_map.items():
+        assumption_info = assumptions_data.get(key)
+        
+        if not assumption_info:
+            logger.debug(f"Assumption '{key}' not found in assumptions data, skipping row {row_num}")
+            continue
+        
+        # Write row label to column M
+        label_cell = worksheet.cell(row=row_num, column=COL_M)
+        if label_cell.value is None or str(label_cell.value).strip() == "":
+            label_cell.value = display_name
+            logger.debug(f"Wrote label '{display_name}' to M{row_num}")
+        
+        # Write type to column N
+        assumption_type = assumption_info.get("type")
+        if assumption_type:
+            type_cell = worksheet.cell(row=row_num, column=COL_N)
+            if type_cell.value is None or str(type_cell.value).strip() == "":
+                type_cell.value = assumption_type
+                logger.debug(f"Wrote type '{assumption_type}' to N{row_num}")
+        
+        # Write values to columns O-S (5 periods)
+        values = assumption_info.get("values", [])
+        if not values:
+            logger.warning(f"No values found for assumption '{key}', skipping values")
+            continue
+        
+        # Ensure we have exactly 5 values (pad with last value or None if needed)
+        if len(values) < 5:
+            # Pad with last value if available, otherwise None
+            last_value = values[-1] if values else None
+            values = values + [last_value] * (5 - len(values))
+            logger.debug(f"Padded values for '{key}' to 5 periods")
+        elif len(values) > 5:
+            # Use first 5 values
+            values = values[:5]
+            logger.debug(f"Truncated values for '{key}' to 5 periods")
+        
+        # Write values to columns O-S
+        value_columns = [COL_O, COL_P, COL_Q, COL_R, COL_S]
+        for col_idx, value in zip(value_columns, values):
+            if value is not None:
+                value_cell = worksheet.cell(row=row_num, column=col_idx)
+                # Write as number (float)
+                if isinstance(value, (int, float)):
+                    value_cell.value = float(value)
+                else:
+                    # Try to convert to float
+                    try:
+                        value_cell.value = float(value)
+                    except (ValueError, TypeError):
+                        logger.warning(f"Could not convert value '{value}' to float for '{key}' at column {col_idx}")
+                        continue
+                logger.debug(f"Wrote value {value} to {chr(64 + col_idx)}{row_num} for '{key}'")
+        
+        logger.info(f"Populated assumption '{display_name}' (type: {assumption_type}) with {len([v for v in values if v is not None])} values")
+    
+    logger.info("Populated 3-statement assumptions table (M4-S10)")
+    
+    # Populate Balance Sheet assumptions table (M25-S27)
+    # Note: balance_sheet is at the root level of assumptions dict, not under assumptions_data
+    bs_assumptions_data = assumptions.get("balance_sheet")
+    if bs_assumptions_data:
+        logger.info("Populating Balance Sheet assumptions table")
+        
+        # Column mappings (same as Income Statement)
+        COL_M = 13  # Row labels
+        COL_N = 14  # Types
+        COL_O = 15  # Period 1
+        COL_P = 16  # Period 2
+        COL_Q = 17  # Period 3
+        COL_R = 18  # Period 4
+        COL_S = 19  # Period 5
+        
+        # Row mappings for Balance Sheet assumptions (starting at row 25)
+        ROW_DEPRECIATION_PPE = 25
+        ROW_INVENTORY_SALES = 26
+        ROW_LT_DEBT_CHANGE = 27
+        
+        # Balance Sheet assumption mapping: key name -> (row, display_name)
+        bs_assumption_map = {
+            "depreciation_ppe": (ROW_DEPRECIATION_PPE, "Depreciation % of PPE"),
+            "inventory_sales": (ROW_INVENTORY_SALES, "Inventory % Sales"),
+            "lt_debt_change": (ROW_LT_DEBT_CHANGE, "Long Term Debt Change"),
+        }
+        
+        # Write row labels, types, and values for Balance Sheet assumptions
+        for key, (row_num, display_name) in bs_assumption_map.items():
+            assumption_info = bs_assumptions_data.get(key)
+            
+            if not assumption_info:
+                logger.debug(f"Balance Sheet assumption '{key}' not found in assumptions data, skipping row {row_num}")
+                continue
+            
+            # Write row label to column M
+            label_cell = worksheet.cell(row=row_num, column=COL_M)
+            label_cell.value = display_name
+            logger.debug(f"Wrote label '{display_name}' to M{row_num}")
+            
+            # Write type to column N
+            assumption_type = assumption_info.get("type")
+            if assumption_type:
+                type_cell = worksheet.cell(row=row_num, column=COL_N)
+                type_cell.value = assumption_type
+                logger.debug(f"Wrote type '{assumption_type}' to N{row_num}")
+            
+            # Write values to columns O-S (5 periods)
+            values = assumption_info.get("values", [])
+            if not values:
+                logger.warning(f"No values found for Balance Sheet assumption '{key}', skipping values")
+                continue
+            
+            # Ensure we have exactly 5 values (pad with last value or None if needed)
+            if len(values) < 5:
+                # Pad with last value if available, otherwise None
+                last_value = values[-1] if values else None
+                values = values + [last_value] * (5 - len(values))
+                logger.debug(f"Padded values for '{key}' to 5 periods")
+            elif len(values) > 5:
+                # Use first 5 values
+                values = values[:5]
+                logger.debug(f"Truncated values for '{key}' to 5 periods")
+            
+            # Write values to columns O-S
+            value_columns = [COL_O, COL_P, COL_Q, COL_R, COL_S]
+            for col_idx, value in zip(value_columns, values):
+                if value is not None:
+                    value_cell = worksheet.cell(row=row_num, column=col_idx)
+                    # Write as number (float)
+                    if isinstance(value, (int, float)):
+                        value_cell.value = float(value)
+                    else:
+                        # Try to convert to float
+                        try:
+                            value_cell.value = float(value)
+                        except (ValueError, TypeError):
+                            logger.warning(f"Could not convert value '{value}' to float for '{key}' at column {col_idx}")
+                            continue
+                    logger.debug(f"Wrote value {value} to {chr(64 + col_idx)}{row_num} for '{key}'")
+            
+            logger.info(f"Populated Balance Sheet assumption '{display_name}' (type: {assumption_type}) with {len([v for v in values if v is not None])} values")
+        
+        logger.info("Populated Balance Sheet assumptions table (M25-S27)")
+    else:
+        logger.debug("No Balance Sheet assumptions data found, skipping Balance Sheet assumptions table")
+    
+    # Populate Cash Flow assumptions table (M72-S74)
+    # Note: cash_flow is at the root level of assumptions dict
+    cf_assumptions_data = assumptions.get("cash_flow")
+    if cf_assumptions_data:
+        logger.info("Populating Cash Flow assumptions table")
+        
+        # Column mappings (same as Income Statement and Balance Sheet)
+        COL_M = 13  # Row labels
+        COL_N = 14  # Types
+        COL_O = 15  # Period 1
+        COL_P = 16  # Period 2
+        COL_Q = 17  # Period 3
+        COL_R = 18  # Period 4
+        COL_S = 19  # Period 5
+        
+        # Row mappings for Cash Flow assumptions
+        ROW_SHARE_REPURCHASES = 72
+        ROW_DIVIDENDS_NI = 73
+        ROW_CAPEX = 74
+        
+        # Cash Flow assumption mapping: key name -> (row, display_name)
+        cf_assumption_map = {
+            "share_repurchases": (ROW_SHARE_REPURCHASES, "Share Repurchases"),
+            "dividends_ni": (ROW_DIVIDENDS_NI, "Dividends as a % of Net Income"),
+            "capex": (ROW_CAPEX, "CAPEX"),
+        }
+        
+        # Write row labels, types, and values for Cash Flow assumptions
+        for key, (row_num, display_name) in cf_assumption_map.items():
+            assumption_info = cf_assumptions_data.get(key)
+            
+            if not assumption_info:
+                logger.debug(f"Cash Flow assumption '{key}' not found in assumptions data, skipping row {row_num}")
+                continue
+            
+            # Write row label to column M
+            label_cell = worksheet.cell(row=row_num, column=COL_M)
+            label_cell.value = display_name
+            logger.debug(f"Wrote label '{display_name}' to M{row_num}")
+            
+            # Write type to column N
+            assumption_type = assumption_info.get("type")
+            if assumption_type:
+                type_cell = worksheet.cell(row=row_num, column=COL_N)
+                type_cell.value = assumption_type
+                logger.debug(f"Wrote type '{assumption_type}' to N{row_num}")
+            
+            # Write values to columns O-S (5 periods)
+            values = assumption_info.get("values", [])
+            if not values:
+                logger.warning(f"No values found for Cash Flow assumption '{key}', skipping values")
+                continue
+            
+            # Ensure we have exactly 5 values (pad with last value or None if needed)
+            if len(values) < 5:
+                # Pad with last value if available, otherwise None
+                last_value = values[-1] if values else None
+                values = values + [last_value] * (5 - len(values))
+                logger.debug(f"Padded values for '{key}' to 5 periods")
+            elif len(values) > 5:
+                # Use first 5 values
+                values = values[:5]
+                logger.debug(f"Truncated values for '{key}' to 5 periods")
+            
+            # Write values to columns O-S
+            value_columns = [COL_O, COL_P, COL_Q, COL_R, COL_S]
+            for col_idx, value in zip(value_columns, values):
+                if value is not None:
+                    value_cell = worksheet.cell(row=row_num, column=col_idx)
+                    # Write as number (float)
+                    if isinstance(value, (int, float)):
+                        value_cell.value = float(value)
+                    else:
+                        # Try to convert to float
+                        try:
+                            value_cell.value = float(value)
+                        except (ValueError, TypeError):
+                            logger.warning(f"Could not convert value '{value}' to float for '{key}' at column {col_idx}")
+                            continue
+                    logger.debug(f"Wrote value {value} to {chr(64 + col_idx)}{row_num} for '{key}'")
+            
+            logger.info(f"Populated Cash Flow assumption '{display_name}' (type: {assumption_type}) with {len([v for v in values if v is not None])} values")
+        
+        logger.info("Populated Cash Flow assumptions table (M72-S74)")
+    else:
+        logger.debug("No Cash Flow assumptions data found, skipping Cash Flow assumptions table")
 
 
 def fetch_competitor_metrics(ticker: str) -> Optional[Dict[str, Any]]:
@@ -4405,6 +4743,11 @@ def populate_rv_sheet(
     if not company_name:
         logger.warning("No company name provided, skipping RV sheet population")
         return
+    
+    # Write company name to B2: "Company Name Relative Valuation"
+    title_cell = worksheet.cell(row=2, column=2)  # Cell B2
+    title_cell.value = f"{company_name} Relative Valuation"
+    logger.debug(f"Wrote '{company_name} Relative Valuation' to RV Sheet B2")
     
     # Write company name to B5, B13, B16
     worksheet.cell(row=5, column=2).value = company_name  # B5
