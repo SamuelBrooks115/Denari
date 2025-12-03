@@ -30,8 +30,8 @@ export const Navbar = () => {
     <nav className="sticky top-0 z-50 w-full bg-denari-1 border-b border-denari-2/30 backdrop-blur-sm">
       <div className="container mx-auto px-4">
         <div className="flex h-16 items-center justify-between">
-          <Link to="/" className="text-2xl font-bold text-primary hover:text-primary/80 transition-colors">
-            DENARI
+          <Link to="/" className="flex items-center">
+            <img src="/Logos/White%20Denari.png" alt="Denari" className="h-12 w-auto" />
           </Link>
 
           <div className="hidden md:flex items-center gap-6">
