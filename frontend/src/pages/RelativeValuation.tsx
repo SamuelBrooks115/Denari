@@ -51,9 +51,7 @@ export default function RelativeValuation() {
                 <p className="text-muted-foreground leading-relaxed">
                   Relative valuation provides a reality check against absolute valuation methods like DCF. It helps
                   answer the question: "How does the market value similar companies?" This is crucial for understanding
-                  whether a company is overvalued or undervalued relative to its peers. Denari's automated peer
-                  selection and multiple calculation ensures you're using the most relevant comparables for your
-                  analysis. Our platform handles outliers intelligently and provides statistical measures to support
+                  whether a company is overvalued or undervalued relative to its peers. Our platform handles outliers intelligently and provides statistical measures to support
                   your conclusions.
                 </p>
               </div>

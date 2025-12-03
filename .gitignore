@@ -208,3 +208,5 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+backend/data/fmp_stable_raw/screener_results.json
+backend/data/fmp_stable_raw/tech_companies.json

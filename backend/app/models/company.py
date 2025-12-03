@@ -7,7 +7,6 @@ Purpose:
     * Price history (PRICE_EOD)
     * Financial statements & facts (XBRL normalization tables)
     * Valuation model runs / snapshots
-    * Job history records
 
 Minimum MVP Fields:
 - id: Primary key

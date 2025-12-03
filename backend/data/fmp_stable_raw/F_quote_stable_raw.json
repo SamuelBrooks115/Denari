@@ -1,0 +1,19 @@
+{
+  "symbol": "F",
+  "name": "Ford Motor Company",
+  "price": 12.96,
+  "changePercentage": -1.51976,
+  "change": -0.2,
+  "volume": 52831210,
+  "dayLow": 12.87,
+  "dayHigh": 13.19,
+  "yearHigh": 13.97,
+  "yearLow": 8.44,
+  "marketCap": 50720858510,
+  "priceAvg50": 12.5628,
+  "priceAvg200": 11.074,
+  "exchange": "NYSE",
+  "open": 13.19,
+  "previousClose": 13.16,
+  "timestamp": 1764709307
+}

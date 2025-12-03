@@ -49,8 +49,8 @@ export default function Mission() {
           </div>
 
           <div className="bg-gradient-card rounded-2xl p-8 text-white">
-            <h3 className="text-2xl font-bold mb-4">Our Core Values</h3>
-            <div className="flex flex-wrap gap-3">
+            <h3 className="text-2xl font-bold mb-4 text-center">Our Core Values</h3>
+            <div className="flex flex-wrap gap-3 justify-center">
               {keywords.map((keyword) => (
                 <Badge key={keyword} variant="secondary" className="text-base px-4 py-2 bg-white/20 text-white">
                   {keyword}
