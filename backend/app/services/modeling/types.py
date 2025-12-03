@@ -213,8 +213,13 @@ def build_company_model_input(json_data: Dict[str, Any]) -> CompanyModelInput:
     # Extract line items (reuse logic from excel_export.py)
     line_items: List[Dict[str, Any]] = []
     
+    # Check if it's FMP format (has income_statements, balance_sheets, or cash_flow_statements arrays)
+    if "income_statements" in json_data or "balance_sheets" in json_data or "cash_flow_statements" in json_data:
+        # Import here to avoid circular dependency
+        from app.services.modeling.excel_export import extract_line_items_from_json
+        line_items = extract_line_items_from_json(json_data)
     # Check if it's multi-year format (has "filings" key)
-    if "filings" in json_data:
+    elif "filings" in json_data:
         filings = json_data.get("filings", [])
         for filing in filings:
             statements = filing.get("statements", {})

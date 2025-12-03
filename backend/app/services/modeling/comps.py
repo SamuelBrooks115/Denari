@@ -9,15 +9,12 @@ This module is unit-testable without Excel and uses structured dataclass outputs
 """
 
 from typing import Dict, Any, Optional, List
-<<<<<<< HEAD
-=======
 
 from app.services.modeling.types import (
     CompanyModelInput,
     RelativeValuationOutput,
     ComparableCompany,
 )
->>>>>>> 0251f9db5f18529bdb0bfc587a03702c55279b35
 
 
 def run_comps(
@@ -73,7 +70,48 @@ def run_comps(
         "ebitda": ebitda if ebitda is not None else 0.0,
         "net_income": net_income,
     }
-<<<<<<< HEAD
+    
+    # Convert comparables list to ComparableCompany objects
+    comp_list: List[ComparableCompany] = []
+    if comparables:
+        for comp_dict in comparables:
+            comp_list.append(ComparableCompany(
+                name=comp_dict.get("name", ""),
+                ev_ebitda=comp_dict.get("ev_ebitda"),
+                pe=comp_dict.get("pe"),
+                ev_sales=comp_dict.get("ev_sales"),
+            ))
+    
+    # Calculate implied values based on comparables
+    implied_values: Dict[str, Optional[float]] = {}
+    
+    if comp_list:
+        # Calculate median multiples
+        ev_ebitda_multiples = [c.ev_ebitda for c in comp_list if c.ev_ebitda is not None]
+        pe_multiples = [c.pe for c in comp_list if c.pe is not None]
+        ev_sales_multiples = [c.ev_sales for c in comp_list if c.ev_sales is not None]
+        
+        # Implied EV based on EV/EBITDA
+        if ev_ebitda_multiples and ebitda is not None and ebitda > 0:
+            median_ev_ebitda = sorted(ev_ebitda_multiples)[len(ev_ebitda_multiples) // 2]
+            implied_values["ev_ebitda_implied"] = median_ev_ebitda * ebitda
+        
+        # Implied Market Cap based on P/E
+        if pe_multiples and net_income > 0:
+            median_pe = sorted(pe_multiples)[len(pe_multiples) // 2]
+            implied_values["pe_implied_market_cap"] = median_pe * net_income
+        
+        # Implied EV based on EV/Sales
+        if ev_sales_multiples and revenue > 0:
+            median_ev_sales = sorted(ev_sales_multiples)[len(ev_sales_multiples) // 2]
+            implied_values["ev_sales_implied"] = median_ev_sales * revenue
+    
+    return RelativeValuationOutput(
+        subject_company=model_input.ticker,
+        subject_metrics=subject_metrics,
+        comparables=comp_list,
+        implied_values=implied_values,
+    )
 
 
 # Formula template dictionary for comps/relative valuation Excel output
@@ -364,47 +402,3 @@ def write_comps_sheet(
     worksheet.set_column(start_col, start_col, 20)  # Company name column
     for col_idx in range(1, 9):
         worksheet.set_column(start_col + col_idx, start_col + col_idx, 15)  # Data columns
-=======
-    
-    # Convert comparables list to ComparableCompany objects
-    comp_list: List[ComparableCompany] = []
-    if comparables:
-        for comp_dict in comparables:
-            comp_list.append(ComparableCompany(
-                name=comp_dict.get("name", ""),
-                ev_ebitda=comp_dict.get("ev_ebitda"),
-                pe=comp_dict.get("pe"),
-                ev_sales=comp_dict.get("ev_sales"),
-            ))
-    
-    # Calculate implied values based on comparables
-    implied_values: Dict[str, Optional[float]] = {}
-    
-    if comp_list:
-        # Calculate median multiples
-        ev_ebitda_multiples = [c.ev_ebitda for c in comp_list if c.ev_ebitda is not None]
-        pe_multiples = [c.pe for c in comp_list if c.pe is not None]
-        ev_sales_multiples = [c.ev_sales for c in comp_list if c.ev_sales is not None]
-        
-        # Implied EV based on EV/EBITDA
-        if ev_ebitda_multiples and ebitda is not None and ebitda > 0:
-            median_ev_ebitda = sorted(ev_ebitda_multiples)[len(ev_ebitda_multiples) // 2]
-            implied_values["ev_ebitda_implied"] = median_ev_ebitda * ebitda
-        
-        # Implied Market Cap based on P/E
-        if pe_multiples and net_income > 0:
-            median_pe = sorted(pe_multiples)[len(pe_multiples) // 2]
-            implied_values["pe_implied_market_cap"] = median_pe * net_income
-        
-        # Implied EV based on EV/Sales
-        if ev_sales_multiples and revenue > 0:
-            median_ev_sales = sorted(ev_sales_multiples)[len(ev_sales_multiples) // 2]
-            implied_values["ev_sales_implied"] = median_ev_sales * revenue
-    
-    return RelativeValuationOutput(
-        subject_company=model_input.ticker,
-        subject_metrics=subject_metrics,
-        comparables=comp_list,
-        implied_values=implied_values,
-    )
->>>>>>> 0251f9db5f18529bdb0bfc587a03702c55279b35

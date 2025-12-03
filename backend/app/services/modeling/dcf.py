@@ -12,8 +12,6 @@ This module is unit-testable without Excel and uses structured dataclass outputs
 """
 
 from typing import Dict, Any, List, Optional
-<<<<<<< HEAD
-=======
 
 from app.services.modeling.types import (
     ThreeStatementOutput,
@@ -21,7 +19,6 @@ from app.services.modeling.types import (
     DcfYearResult,
     Year,
 )
->>>>>>> 0251f9db5f18529bdb0bfc587a03702c55279b35
 
 
 def run_dcf(
@@ -114,19 +111,16 @@ def run_dcf(
         if shares_outstanding > 0:
             implied_share_price = equity_value / shares_outstanding
 
-<<<<<<< HEAD
-    return {
-        "fcf": fcf_list,
-        "discount_factors": discount_factors,
-        "pv_fcf": pv_fcf,
-        "terminal_value": terminal_value,
-        "pv_terminal_value": pv_terminal_value,
-        "enterprise_value": enterprise_value,
-        "equity_value": equity_value,
-        "implied_share_price": implied_share_price,
-        "wacc": wacc,
-        "terminal_growth_rate": terminal_growth,
-    }
+    return DcfOutput(
+        yearly_results=yearly_results,
+        terminal_value=terminal_value,
+        pv_terminal_value=pv_terminal_value,
+        enterprise_value=enterprise_value,
+        equity_value=equity_value,
+        implied_share_price=implied_share_price,
+        wacc=wacc,
+        terminal_growth_rate=terminal_growth,
+    )
 
 
 # Formula template dictionaries for DCF Excel output
@@ -903,15 +897,3 @@ def write_dcf_sheet(
     worksheet.set_column(start_col, start_col, 25)  # Label column
     for col_idx in range(1, 5):
         worksheet.set_column(start_col + col_idx, start_col + col_idx, 18)  # Data columns
-=======
-    return DcfOutput(
-        yearly_results=yearly_results,
-        terminal_value=terminal_value,
-        pv_terminal_value=pv_terminal_value,
-        enterprise_value=enterprise_value,
-        equity_value=equity_value,
-        implied_share_price=implied_share_price,
-        wacc=wacc,
-        terminal_growth_rate=terminal_growth,
-    )
->>>>>>> 0251f9db5f18529bdb0bfc587a03702c55279b35

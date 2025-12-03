@@ -27,9 +27,6 @@ This module does NOT:
 - Fetch filings or prices.
 """
 
-from io import BytesIO
-from sqlalchemy.orm import Session
-from typing import Optional, Dict, Any
 from __future__ import annotations
 
 from collections import defaultdict
@@ -83,12 +80,13 @@ ROW_LABEL_TO_MODEL_ROLE: Dict[str, str] = {
     "net sales": "IS_REVENUE",
     "total revenue": "IS_REVENUE",
     
-    # COGS - match patterns with parentheses and dashes first
+    # COGS - match patterns with parentheses and dashes first, and more specific patterns first
     "(-) cogs": "IS_COGS",
-    "cogs": "IS_COGS",
+    "cost of revenue": "IS_COGS",  # Must come before "revenue" to avoid false match
     "cost of goods sold": "IS_COGS",
     "cost of goods": "IS_COGS",
     "cost of sales": "IS_COGS",
+    "cogs": "IS_COGS",
     
     # Gross Profit
     "gross profit": "IS_GROSS_PROFIT",
@@ -642,7 +640,14 @@ def _convert_fmp_array_to_line_items(
         
         # Process fields in order if specified, otherwise use dict order
         if field_order:
-            fields_to_process = [(field_name, period.get(field_name)) for field_name in field_order if field_name in period]
+            # Include fields that exist in period, even if value is 0 (zero values are meaningful)
+            fields_to_process = []
+            for field_name in field_order:
+                if field_name in period:
+                    value = period.get(field_name)
+                    # Include the field if value is not None (including 0)
+                    if value is not None:
+                        fields_to_process.append((field_name, value))
         else:
             fields_to_process = period.items()
         
@@ -1193,10 +1198,14 @@ def add_model_role_column(worksheet, role_column: str = "ZZ") -> None:
             cell_value = str(cell.value).strip().lower()
             
             # Check if this label maps to a model role
-            for label_pattern, model_role in ROW_LABEL_TO_MODEL_ROLE.items():
+            # Sort patterns by length (longest first) to match more specific patterns first
+            # This ensures "cost of revenue" matches before "revenue"
+            sorted_patterns = sorted(ROW_LABEL_TO_MODEL_ROLE.items(), key=lambda x: len(x[0]), reverse=True)
+            for label_pattern, model_role in sorted_patterns:
                 if label_pattern in cell_value:
                     role_cell = worksheet.cell(row=row_idx, column=col_idx)
                     role_cell.value = model_role
+                    logger.debug(f"Matched row {row_idx} label '{cell_value}' to model_role '{model_role}' using pattern '{label_pattern}'")
                     break
     
     # Hide the column
@@ -1261,7 +1270,11 @@ def populate_historicals(
             if year in role_values:
                 value = role_values[year]
                 target_cell = worksheet.cell(row=row_idx, column=column_idx)
-                target_cell.value = value
+                # Scale to millions
+                if isinstance(value, (int, float)):
+                    target_cell.value = value / MILLIONS_SCALE
+                else:
+                    target_cell.value = value
 
 
 def _get_current_stock_price(ticker: str, use_fake_data: bool = False) -> Tuple[Optional[float], Optional[str]]:
@@ -2114,12 +2127,12 @@ def populate_cover_sheet(
         logger.info(f"Wrote price ${stock_price:.2f} to Summary sheet C4 (row 4, column 3)")
         
         # Write as-of date directly to the right (D4 - row 4, column 4)
-    if date is None:
-        date = datetime.now().strftime("%m/%d/%Y")
+        if date is None:
+            date = datetime.now().strftime("%m/%d/%Y")
         as_of_text = f"As of {date}"
         summary_sheet.cell(row=4, column=4).value = as_of_text
         logger.info(f"Wrote as-of date '{as_of_text}' to Summary sheet D4 (row 4, column 4)")
-    
+        
         logger.info(f"Populated Summary sheet: Company={company_name}, Ticker={ticker}, Price=${stock_price:.2f}, As-of={as_of_text}")
     else:
         logger.warning("Summary sheet not found, skipping Summary sheet population")
@@ -3220,35 +3233,45 @@ def populate_three_statement_historicals(
                         matching_item = item
                         break
             
-            if not matching_item:
-                logger.debug(f"No line item found for {field_name}")
-                continue
-            
             # Get periods from the line item
-            periods = matching_item.get("periods", {})
-            if not periods:
-                continue
+            periods = matching_item.get("periods", {}) if matching_item else {}
             
             # Write values to columns D, E, F (columns 4, 5, 6)
             # Include zero values as they're meaningful in financial statements
-            for period_date, value in periods.items():
-                try:
-                    # Extract year from period date
-                    year = int(str(period_date).split("-")[0])
-                    if year in year_column_map:
-                        column_idx = year_column_map[year]
-                        target_cell = worksheet.cell(row=target_row, column=column_idx)
-                        # Write value even if it's 0 (zero values are meaningful)
-                        # Scale to millions
-                        target_cell.value = float(value) / MILLIONS_SCALE
-                        
-                        # Set number format
-                        target_cell.number_format = "General"
-                except (ValueError, IndexError, TypeError) as e:
-                    logger.debug(f"Error processing {field_name} period {period_date}: {e}")
-                    continue
-            
-            logger.debug(f"Wrote {field_name} to row {target_row}")
+            # For otherExpenses specifically, ensure we write even if value is 0
+            if periods:
+                for period_date, value in periods.items():
+                    try:
+                        # Extract year from period date
+                        year = int(str(period_date).split("-")[0])
+                        if year in year_column_map:
+                            column_idx = year_column_map[year]
+                            target_cell = worksheet.cell(row=target_row, column=column_idx)
+                            # Write value even if it's 0 (zero values are meaningful)
+                            # Scale to millions
+                            # Explicitly handle 0 values - they should be written
+                            if value == 0 or value == 0.0:
+                                target_cell.value = 0.0
+                            else:
+                                target_cell.value = float(value) / MILLIONS_SCALE
+                            
+                            # Set number format
+                            target_cell.number_format = "General"
+                            logger.debug(f"Wrote {field_name} = {value} to row {target_row}, column {column_idx}")
+                    except (ValueError, IndexError, TypeError) as e:
+                        logger.debug(f"Error processing {field_name} period {period_date}: {e}")
+                        continue
+                
+                logger.debug(f"Wrote {field_name} to row {target_row}")
+            elif matching_item:
+                # If we found the item but no periods, log a warning
+                # This shouldn't happen if the conversion is working correctly
+                logger.warning(f"Found {field_name} line item but no periods data - this may indicate a conversion issue")
+            else:
+                # For otherExpenses, log more detail since it's required to be written even if 0
+                if field_name == "otherExpenses":
+                    logger.warning(f"otherExpenses not found in income statement line items. Available tags: {[item.get('tag') for item in income_items[:10]]}")
+                logger.debug(f"No line item found for {field_name}")
     
     # Step 4: Write balance sheet fields to fixed rows (bypassing model_role matching)
     # These rows have fixed positions in the Excel template
@@ -3322,33 +3345,42 @@ def populate_three_statement_historicals(
                     matching_item = item
                     break
             
-            if not matching_item:
-                logger.debug(f"No line item found for balance sheet field {field_name}")
-                continue
-            
-            # Get periods from the line item
-            periods = matching_item.get("periods", {})
-            if not periods:
-                continue
+            # Get periods from the line item (or empty dict if not found)
+            periods = matching_item.get("periods", {}) if matching_item else {}
             
             # Write values to columns D, E, F (columns 4, 5, 6)
-            for period_date, value in periods.items():
-                try:
-                    # Extract year from period date
-                    year = int(str(period_date).split("-")[0])
-                    if year in year_column_map:
-                        column_idx = year_column_map[year]
-                        target_cell = worksheet.cell(row=target_row, column=column_idx)
-                        # Scale to millions
-                        target_cell.value = float(value) / MILLIONS_SCALE
-                        
-                        # Set number format
-                        target_cell.number_format = "General"
-                except (ValueError, IndexError, TypeError) as e:
-                    logger.debug(f"Error processing balance sheet {field_name} period {period_date}: {e}")
-                    continue
-            
-            logger.debug(f"Wrote balance sheet {field_name} to row {target_row}")
+            # Include zero values as they're meaningful in financial statements
+            # For balance sheet fields, ensure we write even if value is 0
+            if periods:
+                for period_date, value in periods.items():
+                    try:
+                        # Extract year from period date
+                        year = int(str(period_date).split("-")[0])
+                        if year in year_column_map:
+                            column_idx = year_column_map[year]
+                            target_cell = worksheet.cell(row=target_row, column=column_idx)
+                            # Write value even if it's 0 (zero values are meaningful)
+                            # Scale to millions
+                            # Explicitly handle 0 values - they should be written
+                            if value == 0 or value == 0.0:
+                                target_cell.value = 0.0
+                            else:
+                                target_cell.value = float(value) / MILLIONS_SCALE
+                            
+                            # Set number format
+                            target_cell.number_format = "General"
+                            logger.debug(f"Wrote balance sheet {field_name} = {value} to row {target_row}, column {column_idx}")
+                    except (ValueError, IndexError, TypeError) as e:
+                        logger.debug(f"Error processing balance sheet {field_name} period {period_date}: {e}")
+                        continue
+                
+                logger.debug(f"Wrote balance sheet {field_name} to row {target_row}")
+            elif matching_item:
+                # If we found the item but no periods, log a warning
+                # This shouldn't happen if the conversion is working correctly
+                logger.warning(f"Found balance sheet {field_name} line item but no periods data - this may indicate a conversion issue")
+            else:
+                logger.debug(f"No line item found for balance sheet field {field_name}")
     
     # Step 5: Write cash flow statement fields to fixed rows (bypassing model_role matching)
     # These rows have fixed positions in the Excel template
@@ -3542,11 +3574,11 @@ def populate_template_from_json(
         json_path: Path to structured JSON file or FMP raw JSON file
         template_path: Path to Excel template file
         output_path: Path where populated template will be saved
-        target_sheets: List of sheet names to populate (default: ["DCF A", "3 Statement"])
+        target_sheets: List of sheet names to populate (default: ["DCF Base", "3 Statement"])
         assumptions_path: Optional path to assumptions JSON file for 3-statement model
     """
     if target_sheets is None:
-        target_sheets = ["DCF A"]
+        target_sheets = ["DCF Base"]
     
     if not OPENPYXL_AVAILABLE:
         raise ImportError("openpyxl is required for reading Excel templates. Install with: pip install openpyxl")
@@ -3687,9 +3719,9 @@ def populate_template_from_json(
         # Add model_role column
         add_model_role_column(worksheet, role_column="ZZ")
         
-        # For 3 Statement sheet, use fixed column positions (D, E, F for historical)
+        # For 3 Statement sheet, detect Year"A" placeholders like DCF sheets
         if sheet_name == "3 Statement":
-            logger.info("Processing 3 Statement sheet with fixed positions")
+            logger.info("Processing 3 Statement sheet")
             
             # Set sheet title: "Company Name 3 Statement Model (UNITS)"
             if company_name:
@@ -3698,9 +3730,26 @@ def populate_template_from_json(
                 title_cell.font = Font(bold=True, size=14)
                 logger.info(f"Set sheet title to: {company_name} 3 Statement Model (UNITS)")
             
-            # Use fixed historical columns: D(4), E(5), F(6)
-            hist_columns = [4, 5, 6]
-            logger.info(f"Using fixed historical columns for 3 Statement: {hist_columns}")
+            # Detect historical columns from Income Statement row 4 (where Year"A" placeholders are)
+            # Check row 4 for Year"A" placeholders (Income Statement header row)
+            hist_columns = []
+            for col_idx in range(4, 12):  # Columns D through K
+                cell = worksheet.cell(row=4, column=col_idx)
+                cell_value = str(cell.value or "").strip().lower()
+                # Check for Year"A" patterns
+                if "year" in cell_value and ("\"a\"" in cell_value or "'a'" in cell_value or " a" in cell_value):
+                    hist_columns.append(col_idx)
+            
+            # If not found in row 4, try row 16 as fallback
+            if not hist_columns:
+                hist_columns = detect_historical_columns(worksheet)
+            
+            # If still not found, use default columns D, E, F
+            if not hist_columns:
+                logger.info("No Year\"A\" placeholders found in 3 Statement sheet, using default columns D, E, F")
+                hist_columns = [4, 5, 6]
+            
+            logger.info(f"Using historical columns for 3 Statement: {hist_columns}")
             
             # Map years to columns
             year_column_map = map_years_to_columns(years_list, hist_columns)
@@ -3708,14 +3757,15 @@ def populate_template_from_json(
             
             # Populate year headers for all three statements
             # Income Statement (row 4), Balance Sheet (row 24), Cash Flow (row 71)
+            # This function handles Year"A" and Year"E" placeholders
             logger.info("Populating 3-statement year headers")
             populate_three_statement_year_headers(worksheet, years_list, forecast_periods=5)
         else:
-            # For other sheets (e.g., DCF A), detect historical columns from row 16
+            # For other sheets (e.g., DCF Base), detect historical columns from row 16
             hist_columns = detect_historical_columns(worksheet)
-        if not hist_columns:
-            logger.warning(f"No 'Year\"A\"' columns found in sheet '{sheet_name}'. Skipping.")
-            continue
+            if not hist_columns:
+                logger.warning(f"No 'Year\"A\"' columns found in sheet '{sheet_name}'. Skipping.")
+                continue
         
         logger.info(f"Found {len(hist_columns)} historical columns: {hist_columns}")
         
@@ -3723,9 +3773,11 @@ def populate_template_from_json(
         year_column_map = map_years_to_columns(years_list, hist_columns)
         logger.info(f"Mapped years to columns: {year_column_map}")
         
-            # Write year headers to row 16
-        write_year_headers(worksheet, year_column_map, header_row=16)
-        logger.info(f"Wrote year headers to row 16: {sorted(year_column_map.keys())}")
+        # For 3 Statement sheet, year headers are already populated by populate_three_statement_year_headers
+        # For other sheets (DCF Base), write year headers to row 16
+        if sheet_name != "3 Statement":
+            write_year_headers(worksheet, year_column_map, header_row=16)
+            logger.info(f"Wrote year headers to row 16: {sorted(year_column_map.keys())}")
         
         # Populate historicals - use dedicated function for 3 Statement sheet
         if sheet_name == "3 Statement":
@@ -3745,7 +3797,7 @@ def populate_template_from_json(
                 logger.info("Populating 3-statement assumptions")
                 populate_three_statement_assumptions(worksheet, assumptions_data, forecast_periods=5)
         else:
-            # Use generic historical population for other sheets (e.g., DCF A)
+            # Use generic historical population for other sheets (e.g., DCF Base)
             populate_historicals(worksheet, role_column="ZZ", matrix=matrix, year_column_map=year_column_map)
             logger.info(f"Populated historicals for sheet '{sheet_name}'")
     
@@ -3767,6 +3819,7 @@ def export_full_model_to_excel(
     template_path: str,
     output_path: str,
     comps_input: Optional[List[Dict[str, Any]]] = None,
+    assumptions_path: Optional[str] = None,
 ) -> None:
     """
     Main orchestration function to populate Excel template with historical data from JSON.
@@ -3778,8 +3831,10 @@ def export_full_model_to_excel(
         json_path: Path to structured JSON file
         template_path: Path to Excel template file
         output_path: Path where populated template will be saved
-        comps_input: Optional list of comparable company data for RV sheet
+        comps_input: Optional list of comparable company data for RV sheet (deprecated, use assumptions)
             Each dict should have: name, ev_ebitda, pe, ev_sales (or None)
+        assumptions_path: Optional path to assumptions JSON file containing competitors and other assumptions
+            Expected structure: {"competitors": ["TICKER1", "TICKER2", "TICKER3", "TICKER4"], ...}
     """
     if not OPENPYXL_AVAILABLE:
         raise ImportError("openpyxl is required for reading Excel templates. Install with: pip install openpyxl")
@@ -3817,7 +3872,7 @@ def export_full_model_to_excel(
     three_stmt_output = run_three_statement(
         model_input=model_input,
         assumptions=default_assumptions,
-        forecast_periods=5,
+        forecast_periods=3,
     )
     
     logger.info("Running DCF model")
@@ -3854,6 +3909,19 @@ def export_full_model_to_excel(
         shutil.copy2(template_path, output_path)
         template_path = output_path  # Work on the copy
     
+    # Step 3.5: Load assumptions if provided
+    assumptions_data = None
+    if assumptions_path:
+        logger.info(f"Loading assumptions from {assumptions_path}")
+        try:
+            assumptions_data = load_structured_json(assumptions_path)
+            logger.info("Assumptions loaded successfully")
+            competitors = assumptions_data.get("competitors")
+            if competitors:
+                logger.info(f"Found {len(competitors)} competitors in assumptions: {competitors}")
+        except Exception as e:
+            logger.warning(f"Failed to load assumptions: {e}")
+    
     # Step 4: Load Excel template (now working on copy)
     logger.info(f"Loading Excel template from {template_path}")
     workbook = load_excel_template(template_path)
@@ -3862,14 +3930,27 @@ def export_full_model_to_excel(
     logger.info("Populating cover sheet and summary sheet")
     # Use fake pricing for dummy/test data
     use_fake_pricing = model_input.ticker.upper() in ["DUMMY", "TEST", "FAKE"]
-    populate_cover_sheet(workbook, model_input.name, model_input.ticker, use_fake_pricing=use_fake_pricing)
+    # Extract quote data if available
+    quote_data = json_data.get("quote")
+    populate_cover_sheet(
+        workbook, 
+        model_input.name, 
+        model_input.ticker, 
+        use_fake_pricing=use_fake_pricing,
+        quote_data=quote_data
+    )
     
     # Step 4.5: Populate DCF year headers for all DCF sheets
     logger.info("Populating DCF year headers")
-    populate_dcf_year_headers(workbook, years_list, forecast_periods=5)
+    populate_dcf_year_headers(workbook, years_list, forecast_periods=3)
     
-    # Step 5: Process DCF A and 3 Statement sheets
-    target_sheets = ["DCF A", "3 Statement"]
+    # Step 4.6: Extract line items from JSON for 3-statement sheet
+    logger.info("Extracting line items from JSON")
+    line_items = extract_line_items_from_json(json_data)
+    logger.info(f"Extracted {len(line_items)} line items")
+    
+    # Step 5: Process DCF Base and 3 Statement sheets
+    target_sheets = ["DCF Base", "3 Statement"]
     for sheet_name in target_sheets:
         if sheet_name not in workbook.sheetnames:
             logger.warning(f"Sheet '{sheet_name}' not found in template. Skipping.")
@@ -3878,42 +3959,107 @@ def export_full_model_to_excel(
         logger.info(f"Processing sheet: {sheet_name}")
         worksheet = workbook[sheet_name]
         
-        # Add model_role column
-        add_model_role_column(worksheet, role_column="ZZ")
-        
-        # Detect historical columns (looks for "Year"A" headers)
-        hist_columns = detect_historical_columns(worksheet)
-        if not hist_columns:
-            logger.warning(f"No 'Year\"A\"' columns found in sheet '{sheet_name}'. Skipping.")
-            continue
-        
-        logger.info(f"Found {len(hist_columns)} historical columns: {hist_columns}")
-        
-        # Map years to columns
-        year_column_map = map_years_to_columns(years_list, hist_columns)
-        logger.info(f"Mapped years to columns: {year_column_map}")
-        
-        # Write year headers to row 16
-        write_year_headers(worksheet, year_column_map, header_row=16)
-        logger.info(f"Wrote year headers to row 16")
-        
-        # Populate historicals
-        populate_historicals(worksheet, role_column="ZZ", matrix=matrix, year_column_map=year_column_map)
-        logger.info(f"Populated historicals for sheet '{sheet_name}'")
-        
-        # Populate WACC and Other Assumptions if this is the DCF A sheet
-        if sheet_name == "DCF A":
-            logger.info("Populating WACC and Other Assumptions for DCF A sheet")
-            populate_wacc_and_assumptions(worksheet, model_input, dcf_output, default_assumptions)
+        # Handle 3 Statement sheet differently from DCF Base sheet
+        if sheet_name == "3 Statement":
+            # Add model_role column for 3 Statement sheet
+            add_model_role_column(worksheet, role_column="ZZ")
+            logger.info("Processing 3 Statement sheet")
+            
+            # Set sheet title: "Company Name 3 Statement Model (UNITS)"
+            if model_input.name:
+                title_cell = worksheet.cell(row=2, column=2)  # Cell B2
+                title_cell.value = f"{model_input.name} 3 Statement Model (UNITS)"
+                if Font:
+                    title_cell.font = Font(bold=True, size=14)
+                logger.info(f"Set sheet title to: {model_input.name} 3 Statement Model (UNITS)")
+            
+            # Detect historical columns from Income Statement row 4 (where Year"A" placeholders are)
+            # Check row 4 for Year"A" placeholders (Income Statement header row)
+            hist_columns = []
+            for col_idx in range(4, 12):  # Columns D through K
+                cell = worksheet.cell(row=4, column=col_idx)
+                cell_value = str(cell.value or "").strip().lower()
+                # Check for Year"A" patterns
+                if "year" in cell_value and ("\"a\"" in cell_value or "'a'" in cell_value or " a" in cell_value):
+                    hist_columns.append(col_idx)
+            
+            # If not found in row 4, try row 16 as fallback
+            if not hist_columns:
+                hist_columns = detect_historical_columns(worksheet)
+            
+            # If still not found, use default columns D, E, F
+            if not hist_columns:
+                logger.info("No Year\"A\" placeholders found in 3 Statement sheet, using default columns D, E, F")
+                hist_columns = [4, 5, 6]
+            
+            logger.info(f"Using historical columns for 3 Statement: {hist_columns}")
+            
+            # Map years to columns
+            year_column_map = map_years_to_columns(years_list, hist_columns)
+            logger.info(f"Mapped years to columns: {year_column_map}")
+            
+            # Populate year headers for all three statements
+            # Income Statement (row 4), Balance Sheet (row 24), Cash Flow (row 71)
+            # This function handles Year"A" and Year"E" placeholders
+            logger.info("Populating 3-statement year headers")
+            populate_three_statement_year_headers(worksheet, years_list, forecast_periods=5)
+            
+            # Populate historicals using dedicated function for 3 Statement sheet
+            populate_three_statement_historicals(
+                worksheet, 
+                role_column="ZZ", 
+                matrix=matrix, 
+                year_column_map=year_column_map,
+                line_items=line_items
+            )
+            logger.info(f"Populated 3-statement historicals for sheet '{sheet_name}'")
+        elif sheet_name == "DCF Base":
+            # For DCF Base sheet, only year headers are populated (already done in Step 4.5)
+            # Skip historical data and WACC/assumptions population
+            logger.info("DCF Base sheet: Year headers already populated, skipping historical data and WACC/assumptions")
+        else:
+            # For other sheets (if any), use standard DCF logic
+            # Detect historical columns (looks for "Year"A" headers)
+            hist_columns = detect_historical_columns(worksheet)
+            if not hist_columns:
+                logger.warning(f"No 'Year\"A\"' columns found in sheet '{sheet_name}'. Skipping.")
+                continue
+            
+            logger.info(f"Found {len(hist_columns)} historical columns: {hist_columns}")
+            
+            # Map years to columns
+            year_column_map = map_years_to_columns(years_list, hist_columns)
+            logger.info(f"Mapped years to columns: {year_column_map}")
+            
+            # Write year headers to row 16
+            write_year_headers(worksheet, year_column_map, header_row=16)
+            logger.info(f"Wrote year headers to row 16")
+            
+            # Populate historicals
+            populate_historicals(worksheet, role_column="ZZ", matrix=matrix, year_column_map=year_column_map)
+            logger.info(f"Populated historicals for sheet '{sheet_name}'")
     
-    # Step 6: Process RV sheet if comps_input provided
-    if comps_input and "RV" in workbook.sheetnames:
-        logger.info("Processing RV sheet")
+    # Step 6: Process RV sheet (subject company only)
+    if "RV" in workbook.sheetnames:
+        logger.info("Processing RV sheet (subject company)")
         worksheet = workbook["RV"]
-        _write_rv_sheet(worksheet, model_input, comps_input)
-        logger.info("Populated RV sheet")
-    elif comps_input:
-        logger.warning("RV sheet not found in template, skipping comps data")
+        # Extract quote data if available
+        quote_data = json_data.get("quote")
+        # Auto-detect FMP format
+        is_fmp_format = (
+            "income_statements" in json_data or 
+            "balance_sheets" in json_data or 
+            "cash_flow_statements" in json_data
+        )
+        populate_rv_sheet(
+            worksheet, 
+            json_data, 
+            model_input.name, 
+            is_fmp_format=is_fmp_format,
+            quote_data=quote_data,
+            assumptions=assumptions_data
+        )
+        logger.info("Populated RV sheet with subject company data")
     
     # Step 7: Save workbook
     logger.info(f"Saving populated template to {output_path}")
@@ -3928,13 +4074,13 @@ def populate_wacc_and_assumptions(
     assumptions: Dict[str, Any]
 ) -> None:
     """
-    Populate WACC calculation inputs and Other Assumptions in DCF A sheet.
+    Populate WACC calculation inputs and Other Assumptions in DCF Base sheet.
     
     Searches for labels in column B (WACC section) and column G (Other Assumptions),
     then writes values to columns D/E and I/J respectively.
     
     Args:
-        worksheet: openpyxl Worksheet object for DCF A sheet
+        worksheet: openpyxl Worksheet object for DCF Base sheet
         model_input: CompanyModelInput with historical data
         dcf_output: DcfOutput from run_dcf()
         assumptions: Dict with assumptions (wacc, tax_rate, terminal_growth_rate, etc.)
@@ -4045,6 +4191,471 @@ def populate_wacc_and_assumptions(
             logger.debug(f"Wrote Current Price = {current_price} to row 9, column J")
 
 
+def fetch_competitor_metrics(ticker: str) -> Optional[Dict[str, Any]]:
+    """
+    Fetch and extract competitor metrics from FMP API.
+    
+    Optimized to fetch only the minimum required data:
+    - Quote data (Market Cap, Share Price) - single API call
+    - Income Statement (Sales, EPS, Shares Outstanding) - limit=1 (latest period only)
+    - Balance Sheet (Book Value, Net Debt) - limit=1 (latest period only)
+    
+    Does NOT fetch Cash Flow Statement (not needed for competitor metrics).
+    
+    Extracts the same metrics as subject company:
+    - Market Cap (from quote)
+    - Share Price (from quote)
+    - Sales/Revenue (from income statement)
+    - Enterprise Value (calculated: Market Cap + Net Debt)
+    - Net Debt (from balance sheet or calculated)
+    - EPS (from income statement)
+    - Book Value (from balance sheet)
+    - Shares Outstanding (from income statement)
+    
+    Args:
+        ticker: Competitor ticker symbol (e.g., "AAPL")
+        
+    Returns:
+        Dictionary with metrics or None if data unavailable
+        {
+            "market_cap": float,
+            "share_price": float,
+            "sales": float,
+            "enterprise_value": float,
+            "net_debt": float,
+            "eps": float,
+            "book_value": float,
+            "shares_outstanding": float,
+            "company_name": str
+        }
+    """
+    from app.data.fmp_client import fetch_quote, fetch_income_statement, fetch_balance_sheet
+    
+    try:
+        logger.info(f"Fetching competitor data for {ticker} (optimized: quote + IS + BS only)")
+        metrics = {}
+        company_name = ticker
+        
+        # Fetch quote data (Market Cap, Share Price)
+        try:
+            quote_data = fetch_quote(ticker.upper())
+            metrics["market_cap"] = quote_data.get("marketCap")
+            metrics["share_price"] = quote_data.get("price")
+            logger.debug(f"Fetched quote data for {ticker}: marketCap={metrics.get('market_cap')}, price={metrics.get('share_price')}")
+        except Exception as e:
+            logger.warning(f"Error fetching quote data for {ticker}: {e}")
+        
+        # Fetch income statement (Sales, EPS, Shares Outstanding) - only latest period
+        try:
+            income_data = fetch_income_statement(ticker.upper(), limit=1)
+            if income_data and isinstance(income_data, list) and len(income_data) > 0:
+                latest_income = income_data[0]
+                company_name = latest_income.get("companyName", ticker)
+                
+                # Extract income statement metrics
+                metrics["sales"] = latest_income.get("revenue")
+                metrics["eps"] = latest_income.get("epsDiluted") or latest_income.get("eps")
+                metrics["shares_outstanding"] = (
+                    latest_income.get("weightedAverageShsOutDil") or 
+                    latest_income.get("weightedAverageShsOut")
+                )
+                logger.debug(f"Fetched income statement for {ticker}: revenue={metrics.get('sales')}, eps={metrics.get('eps')}")
+        except Exception as e:
+            logger.warning(f"Error fetching income statement for {ticker}: {e}")
+        
+        # Fetch balance sheet (Book Value, Net Debt) - only latest period
+        try:
+            balance_data = fetch_balance_sheet(ticker.upper(), limit=1)
+            if balance_data and isinstance(balance_data, list) and len(balance_data) > 0:
+                latest_balance = balance_data[0]
+                
+                # Book Value
+                metrics["book_value"] = (
+                    latest_balance.get("totalStockholdersEquity") or 
+                    latest_balance.get("totalEquity")
+                )
+                
+                # Net Debt
+                metrics["net_debt"] = latest_balance.get("netDebt")
+                if metrics["net_debt"] is None:
+                    total_debt = latest_balance.get("totalDebt")
+                    cash = latest_balance.get("cashAndCashEquivalents")
+                    if total_debt is not None and cash is not None:
+                        metrics["net_debt"] = total_debt - cash
+                logger.debug(f"Fetched balance sheet for {ticker}: bookValue={metrics.get('book_value')}, netDebt={metrics.get('net_debt')}")
+        except Exception as e:
+            logger.warning(f"Error fetching balance sheet for {ticker}: {e}")
+        
+        # Calculate Enterprise Value
+        if metrics.get("market_cap") is not None and metrics.get("net_debt") is not None:
+            metrics["enterprise_value"] = metrics["market_cap"] + metrics["net_debt"]
+        
+        metrics["company_name"] = company_name
+        
+        logger.info(f"Successfully extracted metrics for {ticker}: {list(metrics.keys())}")
+        return metrics
+        
+    except Exception as e:
+        logger.warning(f"Error fetching competitor metrics for {ticker}: {e}")
+        return None
+
+
+def populate_competitor_data(
+    worksheet,
+    competitors: List[str]
+) -> None:
+    """
+    Populate competitor data in RV sheet.
+    
+    Writes competitor names to paired rows (B6/B17, B7/B18, B8/B19, B9/B20)
+    and metrics to rows 17-20, columns D-K.
+    
+    Args:
+        worksheet: openpyxl Worksheet object for RV sheet
+        competitors: List of 4 competitor ticker symbols
+    """
+    MILLIONS_SCALE = 1_000_000
+    
+    # Competitor name rows (paired)
+    name_rows_upper = [6, 7, 8, 9]  # B6-B9
+    name_rows_lower = [17, 18, 19, 20]  # B17-B20
+    
+    # Metrics rows (same as lower name rows)
+    metrics_rows = [17, 18, 19, 20]
+    
+    metric_order = [
+        ("market_cap", 4, True),      # D - Market Cap - scale to millions
+        ("share_price", 5, False),    # E - Share Price - keep as-is (dollars)
+        ("sales", 6, True),           # F - Sales (Revenue) - scale to millions
+        ("enterprise_value", 7, True), # G - Enterprise Value - scale to millions
+        ("net_debt", 8, True),        # H - Net Debt - scale to millions
+        ("eps", 9, False),            # I - EPS - keep as-is (dollars per share)
+        ("book_value", 10, True),      # J - Book Value - scale to millions
+        ("shares_outstanding", 11, False), # K - Shares Outstanding - keep as-is (shares)
+    ]
+    
+    for idx, ticker in enumerate(competitors):
+        if idx >= 4:
+            break  # Only handle first 4 competitors
+        
+        # Fetch competitor metrics
+        competitor_metrics = fetch_competitor_metrics(ticker)
+        
+        if not competitor_metrics:
+            logger.warning(f"Skipping competitor {ticker} - failed to fetch metrics")
+            continue
+        
+        company_name = competitor_metrics.get("company_name", ticker)
+        
+        # Write competitor name to paired rows
+        if idx < len(name_rows_upper):
+            # Upper row (B6-B9)
+            worksheet.cell(row=name_rows_upper[idx], column=2).value = company_name
+            logger.debug(f"Wrote competitor {idx+1} name '{company_name}' to B{name_rows_upper[idx]}")
+        
+        if idx < len(name_rows_lower):
+            # Lower row (B17-B20)
+            worksheet.cell(row=name_rows_lower[idx], column=2).value = company_name
+            logger.debug(f"Wrote competitor {idx+1} name '{company_name}' to B{name_rows_lower[idx]}")
+        
+        # Write metrics to row 17-20, columns D-K
+        if idx < len(metrics_rows):
+            target_row = metrics_rows[idx]
+            for metric_key, column, scale_to_millions in metric_order:
+                value = competitor_metrics.get(metric_key)
+                if value is not None:
+                    cell = worksheet.cell(row=target_row, column=column)
+                    if scale_to_millions:
+                        cell.value = float(value) / MILLIONS_SCALE
+                    else:
+                        cell.value = float(value)
+                    cell.number_format = "General"
+                    logger.debug(f"Wrote competitor {idx+1} {metric_key} = {value} {'(scaled to millions)' if scale_to_millions else ''} to row {target_row}, column {column}")
+                else:
+                    logger.debug(f"No value found for competitor {idx+1} {metric_key}, skipping")
+            
+            logger.info(f"Populated competitor {idx+1} ({ticker}) metrics to row {target_row}")
+
+
+def populate_rv_sheet(
+    worksheet,
+    json_data: Dict[str, Any],
+    company_name: str,
+    is_fmp_format: bool = False,
+    quote_data: Optional[Dict[str, Any]] = None,
+    assumptions: Optional[Dict[str, Any]] = None
+) -> None:
+    """
+    Populate RV (Relative Valuation) sheet with company name and key metrics.
+    
+    Writes:
+    - Company name to cells B5, B13, B16
+    - Metrics to columns D-K in row 16 only: Market Cap | Share Price | Sales (Revenue) | Enterprise Value | Net Debt | EPS | Book Value | Shares Outstanding
+    - Competitor names to B6-B9 and B17-B20 (paired rows)
+    - Competitor metrics to rows 17-20, columns D-K
+    
+    Args:
+        worksheet: openpyxl Worksheet object for RV sheet
+        json_data: JSON data containing financial statements
+        company_name: Company name string
+        is_fmp_format: Whether JSON is in FMP format
+        quote_data: Optional quote/price data dictionary
+        assumptions: Optional assumptions dictionary containing competitors list: {"competitors": ["TICKER1", "TICKER2", "TICKER3", "TICKER4"]}
+    """
+    if not company_name:
+        logger.warning("No company name provided, skipping RV sheet population")
+        return
+    
+    # Write company name to B5, B13, B16
+    worksheet.cell(row=5, column=2).value = company_name  # B5
+    worksheet.cell(row=13, column=2).value = company_name  # B13
+    worksheet.cell(row=16, column=2).value = company_name  # B16
+    logger.info(f"Wrote company name '{company_name}' to B5, B13, B16")
+    
+    # Extract metrics from JSON data
+    metrics = {}
+    
+    # Get quote data if not provided (try regardless of format)
+    if not quote_data:
+        quote_data = json_data.get("quote") or json_data.get("quote_data")
+        # If quote is a file path string, try to load it
+        if isinstance(quote_data, str) and Path(quote_data).exists():
+            try:
+                with open(quote_data, "r", encoding="utf-8") as f:
+                    quote_data = json.load(f)
+                logger.debug(f"Loaded quote data from file")
+            except Exception as e:
+                logger.warning(f"Failed to load quote data from file: {e}")
+                quote_data = None
+        elif quote_data:
+            logger.debug(f"Found quote data in JSON")
+    
+    # Extract from quote data
+    if quote_data:
+        # Try multiple field name variations for market cap
+        metrics["market_cap"] = (
+            quote_data.get("marketCap") or
+            quote_data.get("market_cap") or
+            quote_data.get("MarketCap") or
+            quote_data.get("mktCap")
+        )
+        # Try multiple field name variations for share price
+        metrics["share_price"] = (
+            quote_data.get("price") or
+            quote_data.get("sharePrice") or
+            quote_data.get("SharePrice") or
+            quote_data.get("currentPrice")
+        )
+        if metrics["market_cap"]:
+            logger.debug(f"Found market cap: {metrics['market_cap']}")
+        if metrics["share_price"]:
+            logger.debug(f"Found share price: {metrics['share_price']}")
+    
+    # Auto-detect FMP format if JSON has FMP structure
+    has_fmp_structure = (
+        "income_statements" in json_data or 
+        "balance_sheets" in json_data or 
+        "cash_flow_statements" in json_data
+    )
+    if has_fmp_structure:
+        is_fmp_format = True
+        logger.debug("Auto-detected FMP format from JSON structure")
+    
+    # Extract from income statement (most recent period)
+    income_statements = []
+    if is_fmp_format:
+        income_statements = json_data.get("income_statements", [])
+        logger.debug(f"Found {len(income_statements)} income statements in FMP format")
+    else:
+        # Structured format - use extract_line_items_from_json to handle all formats
+        line_items = extract_line_items_from_json(json_data)
+        # Group by statement type and find latest period
+        income_items = [item for item in line_items if item.get("statement") == "income_statement"]
+        
+        # Get latest period from income statement items
+        if income_items:
+            # Find all periods across income statement items
+            all_periods = set()
+            for item in income_items:
+                periods = item.get("periods", {})
+                all_periods.update(periods.keys())
+            
+            if all_periods:
+                # Get latest period (most recent date)
+                latest_period = max(all_periods)
+                
+                # Build latest income statement from line items
+                latest_income = {}
+                for item in income_items:
+                    periods = item.get("periods", {})
+                    if latest_period in periods:
+                        tag = item.get("tag", "")
+                        value = periods[latest_period]
+                        latest_income[tag] = value
+                
+                income_statements = [latest_income]
+    
+    if income_statements and len(income_statements) > 0:
+        latest_income = income_statements[0]  # Most recent is first
+        logger.debug(f"Extracting metrics from income statement dated: {latest_income.get('date', 'unknown')}")
+        
+        # Sales (Revenue) - try multiple field names
+        metrics["sales"] = (
+            latest_income.get("revenue") or 
+            latest_income.get("Revenue") or
+            latest_income.get("totalRevenue")
+        )
+        if metrics["sales"]:
+            logger.debug(f"Found revenue: {metrics['sales']}")
+        
+        # EPS (prefer diluted)
+        metrics["eps"] = latest_income.get("epsDiluted") or latest_income.get("eps") or latest_income.get("EPS")
+        if metrics["eps"]:
+            logger.debug(f"Found EPS: {metrics['eps']}")
+        
+        # Shares Outstanding (prefer diluted)
+        metrics["shares_outstanding"] = (
+            latest_income.get("weightedAverageShsOutDil") or 
+            latest_income.get("weightedAverageShsOut") or
+            latest_income.get("sharesOutstanding")
+        )
+        if metrics["shares_outstanding"]:
+            logger.debug(f"Found shares outstanding: {metrics['shares_outstanding']}")
+    
+    # Extract from balance sheet (most recent period)
+    balance_sheets = []
+    if is_fmp_format:
+        balance_sheets = json_data.get("balance_sheets", [])
+        logger.debug(f"Found {len(balance_sheets)} balance sheets in FMP format")
+    else:
+        # Structured format - use extract_line_items_from_json to handle all formats
+        line_items = extract_line_items_from_json(json_data)
+        # Group by statement type and find latest period
+        balance_items = [item for item in line_items if item.get("statement") == "balance_sheet"]
+        
+        # Get latest period from balance sheet items
+        if balance_items:
+            # Find all periods across balance sheet items
+            all_periods = set()
+            for item in balance_items:
+                periods = item.get("periods", {})
+                all_periods.update(periods.keys())
+            
+            if all_periods:
+                # Get latest period (most recent date)
+                latest_period = max(all_periods)
+                
+                # Build latest balance sheet from line items
+                latest_balance = {}
+                for item in balance_items:
+                    periods = item.get("periods", {})
+                    if latest_period in periods:
+                        tag = item.get("tag", "")
+                        value = periods[latest_period]
+                        latest_balance[tag] = value
+                
+                balance_sheets = [latest_balance]
+    
+    if balance_sheets and len(balance_sheets) > 0:
+        latest_balance = balance_sheets[0]  # Most recent is first
+        logger.debug(f"Extracting metrics from balance sheet dated: {latest_balance.get('date', 'unknown')}")
+        
+        # Book Value (Total Equity) - try multiple field names
+        metrics["book_value"] = (
+            latest_balance.get("totalStockholdersEquity") or 
+            latest_balance.get("totalEquity") or
+            latest_balance.get("TotalStockholdersEquity") or
+            latest_balance.get("TotalEquity")
+        )
+        if metrics["book_value"]:
+            logger.debug(f"Found book value: {metrics['book_value']}")
+        
+        # Net Debt - check if already calculated, otherwise calculate from Total Debt - Cash
+        metrics["net_debt"] = latest_balance.get("netDebt")  # FMP format may have this pre-calculated
+        
+        if metrics["net_debt"] is None:
+            # Calculate Net Debt = Total Debt - Cash
+            total_debt = (
+                latest_balance.get("totalDebt") or 
+                latest_balance.get("TotalDebt") or
+                latest_balance.get("totalLiabilities")
+            )
+            cash = (
+                latest_balance.get("cashAndCashEquivalents") or 
+                latest_balance.get("CashAndCashEquivalents") or
+                latest_balance.get("cash") or
+                latest_balance.get("Cash")
+            )
+            if total_debt is not None and cash is not None:
+                metrics["net_debt"] = total_debt - cash
+                logger.debug(f"Calculated net debt: {total_debt} - {cash} = {metrics['net_debt']}")
+        else:
+            logger.debug(f"Found net debt (pre-calculated): {metrics['net_debt']}")
+        
+        # Enterprise Value = Market Cap + Net Debt
+        # (or Market Cap + Total Debt - Cash if net_debt not available)
+        if metrics.get("market_cap") is not None:
+            if metrics.get("net_debt") is not None:
+                metrics["enterprise_value"] = metrics["market_cap"] + metrics["net_debt"]
+                logger.debug(f"Calculated enterprise value: {metrics['market_cap']} + {metrics['net_debt']} = {metrics['enterprise_value']}")
+            else:
+                total_debt = latest_balance.get("totalDebt")
+                cash = latest_balance.get("cashAndCashEquivalents")
+                if total_debt is not None and cash is not None:
+                    metrics["enterprise_value"] = metrics["market_cap"] + total_debt - cash
+                    logger.debug(f"Calculated enterprise value: {metrics['market_cap']} + {total_debt} - {cash} = {metrics['enterprise_value']}")
+    
+    # Write metrics to columns D-K (columns 4-11) for row 16 only
+    # Order: Market Cap | Share Price | Sales (Revenue) | Enterprise Value | Net Debt | EPS | Book Value | Shares Outstanding
+    # Scale to millions where appropriate (Market Cap, Sales, Enterprise Value, Net Debt, Book Value)
+    # Keep as-is: Share Price, EPS, Shares Outstanding
+    MILLIONS_SCALE = 1_000_000
+    
+    metric_order = [
+        ("market_cap", 4, True),      # D - Market Cap - scale to millions
+        ("share_price", 5, False),    # E - Share Price - keep as-is (dollars)
+        ("sales", 6, True),           # F - Sales (Revenue) - scale to millions
+        ("enterprise_value", 7, True), # G - Enterprise Value - scale to millions
+        ("net_debt", 8, True),        # H - Net Debt - scale to millions
+        ("eps", 9, False),            # I - EPS - keep as-is (dollars per share)
+        ("book_value", 10, True),      # J - Book Value - scale to millions
+        ("shares_outstanding", 11, False), # K - Shares Outstanding - keep as-is (shares)
+    ]
+    
+    # Write metrics to row 16 only
+    target_row = 16
+    
+    for metric_key, column, scale_to_millions in metric_order:
+        value = metrics.get(metric_key)
+        if value is not None:
+            cell = worksheet.cell(row=target_row, column=column)
+            if scale_to_millions:
+                cell.value = float(value) / MILLIONS_SCALE
+            else:
+                cell.value = float(value)
+            cell.number_format = "General"
+            logger.debug(f"Wrote {metric_key} = {value} {'(scaled to millions)' if scale_to_millions else ''} to row {target_row}, column {column}")
+        else:
+            logger.debug(f"No value found for {metric_key}, skipping")
+    
+    logger.info(f"Populated RV sheet metrics to row {target_row}: {list(metrics.keys())}")
+    
+    # Step 2: Populate competitor data if provided in assumptions
+    if assumptions:
+        competitors = assumptions.get("competitors")
+        if competitors and isinstance(competitors, list):
+            if len(competitors) > 4:
+                logger.warning(f"More than 4 competitors provided ({len(competitors)}), using first 4")
+                competitors = competitors[:4]
+            elif len(competitors) < 4:
+                logger.warning(f"Less than 4 competitors provided ({len(competitors)}), will populate available competitors")
+            
+            logger.info(f"Populating competitor data for {len(competitors)} competitors")
+            populate_competitor_data(worksheet, competitors)
+        elif competitors:
+            logger.warning(f"Competitors in assumptions is not a list: {type(competitors)}")
+
+
 def _write_rv_sheet(
     worksheet,
     model_input: CompanyModelInput,
@@ -4086,19 +4697,34 @@ def _write_rv_sheet(
     # Typically comps are in rows starting around row 5-10, with columns for Name, EV/EBITDA, P/E, EV/Sales
     
     # Find where to write comps (look for header row)
+    # Try multiple search patterns for comps table
     comps_start_row = None
-    for row_idx in range(1, min(20, worksheet.max_row + 1)):
+    search_patterns = ["comparable", "comp", "peer", "company", "name"]
+    
+    for row_idx in range(1, min(30, worksheet.max_row + 1)):
         row = worksheet[row_idx]
         for cell in row:
-            if cell.value and "comparable" in str(cell.value).lower():
-                comps_start_row = row_idx + 1
-                break
+            if cell.value:
+                cell_value_lower = str(cell.value).lower()
+                # Check if cell contains any of the search patterns
+                if any(pattern in cell_value_lower for pattern in search_patterns):
+                    # Check if this looks like a header row (has multiple headers or is near other headers)
+                    # Look for common comps headers: Name, EV/EBITDA, P/E, EV/Sales
+                    header_indicators = ["ev", "ebitda", "p/e", "pe", "sales", "multiple"]
+                    if any(indicator in cell_value_lower for indicator in header_indicators):
+                        comps_start_row = row_idx + 1
+                        break
+                    # Or if it's just "comparable" or "comp", use the next row
+                    elif "comparable" in cell_value_lower or ("comp" in cell_value_lower and len(cell_value_lower) < 15):
+                        comps_start_row = row_idx + 1
+                        break
         if comps_start_row:
             break
     
+    # If still not found, try a default location (row 5 is common for comps tables)
     if not comps_start_row:
-        logger.warning("Could not find comps table location in RV sheet")
-        return
+        logger.debug("Could not find comps table header in RV sheet, using default row 5")
+        comps_start_row = 5
     
     # Write comps data
     for idx, comp in enumerate(comps_input):
