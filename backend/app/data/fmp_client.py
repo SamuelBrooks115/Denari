@@ -677,20 +677,10 @@ def fetch_available_sectors() -> List[str]:
     
     data = _get_json(path, params)
     
-    # FMP returns a list of objects like [{"sector": "Technology"}, ...]
+    # FMP typically returns a list of strings
     if isinstance(data, list):
-        sectors = []
-        for item in data:
-            if isinstance(item, dict):
-                # Extract sector name from object
-                sector = item.get("sector") or item.get("Sector")
-                if sector and str(sector).strip():
-                    sectors.append(str(sector).strip())
-            elif isinstance(item, str):
-                # Handle case where API returns strings directly
-                if item.strip():
-                    sectors.append(item.strip())
-        
+        # Filter out None/empty values and convert to strings
+        sectors = [str(s).strip() for s in data if s and str(s).strip()]
         logger.info(f"Successfully fetched {len(sectors)} sectors")
         return sectors
     else:
@@ -719,20 +709,10 @@ def fetch_available_industries() -> List[str]:
     
     data = _get_json(path, params)
     
-    # FMP returns a list of objects like [{"industry": "Steel"}, ...]
+    # FMP typically returns a list of strings
     if isinstance(data, list):
-        industries = []
-        for item in data:
-            if isinstance(item, dict):
-                # Extract industry name from object
-                industry = item.get("industry") or item.get("Industry")
-                if industry and str(industry).strip():
-                    industries.append(str(industry).strip())
-            elif isinstance(item, str):
-                # Handle case where API returns strings directly
-                if item.strip():
-                    industries.append(item.strip())
-        
+        # Filter out None/empty values and convert to strings
+        industries = [str(i).strip() for i in data if i and str(i).strip()]
         logger.info(f"Successfully fetched {len(industries)} industries")
         return industries
     else:
