@@ -26,39 +26,40 @@ export const Navbar = () => {
     navigate("/");
   };
 
-  const isMainModelDisabled = !isLoggedIn;
-
   return (
     <nav className="sticky top-0 z-50 w-full bg-denari-1 border-b border-denari-2/30 backdrop-blur-sm">
       <div className="container mx-auto px-4">
         <div className="flex h-16 items-center justify-between">
-          <Link to="/" className="text-2xl font-bold text-primary hover:text-primary/80 transition-colors">
-            DENARI
+          <Link to="/" className="flex items-center">
+            <img src="/Logos/White%20Denari.png" alt="Denari" className="h-12 w-auto" />
           </Link>
 
           <div className="hidden md:flex items-center gap-6">
             <Link
-              to="/industry"
+              to="/"
               className="text-sm font-medium text-denari-4 hover:text-primary transition-colors"
             >
-              Industry/Other
+              Home
             </Link>
-            <button
-              disabled={isMainModelDisabled}
-              className={`text-sm font-medium transition-colors ${
-                isMainModelDisabled
-                  ? "text-denari-4/50 cursor-not-allowed"
-                  : "text-denari-4 hover:text-primary"
-              }`}
-              onClick={() => !isMainModelDisabled && (window.location.href = "/app/model")}
-            >
-              Main Model Page
-            </button>
+            {isLoggedIn && (
+              <Link
+                to="/app/model"
+                className="text-sm font-medium text-denari-4 hover:text-primary transition-colors"
+              >
+                Model
+              </Link>
+            )}
             <Link
               to="/solutions"
               className="text-sm font-medium text-denari-4 hover:text-primary transition-colors"
             >
               Solutions
+            </Link>
+            <Link
+              to="/industry"
+              className="text-sm font-medium text-denari-4 hover:text-primary transition-colors"
+            >
+              Coming Soon
             </Link>
             <Link
               to="/about"

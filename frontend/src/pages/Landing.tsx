@@ -83,6 +83,7 @@ export default function Landing() {
         title="DENARI"
         subtitle="Start Investing Using Denari Today"
         size="large"
+        logo="/Logos/White%20Denari.png"
       >
         <Link to="/login">
           <Button size="lg" className="bg-primary hover:bg-primary/90 text-lg px-8">
