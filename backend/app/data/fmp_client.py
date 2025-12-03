@@ -529,3 +529,292 @@ def fetch_historical_prices(
         raise last_error
     else:
         raise RuntimeError(f"Failed to fetch historical prices for {symbol}")
+
+
+def fetch_enterprise_value(
+    symbol: str,
+    limit: int = 10,
+) -> List[Dict[str, Any]]:
+    """
+    Fetch enterprise value data from FMP /stable API.
+    
+    Calls /stable/enterprise-value?symbol={symbol}&limit={limit}
+    
+    Enterprise value is calculated as: Market Cap + Total Debt - Cash and Cash Equivalents
+    
+    Args:
+        symbol: Stock ticker symbol (e.g., "F" for Ford)
+        limit: Number of periods to fetch (default: 10)
+        
+    Returns:
+        List of enterprise value dictionaries (most recent first)
+        Each dict contains fields like: enterpriseValue, marketCap, totalDebt, cashAndCashEquivalents, etc.
+        
+    Raises:
+        RuntimeError: If API call fails or returns invalid data
+    """
+    # Try different endpoint names - FMP may use different names in /stable
+    endpoints_to_try = [
+        "enterprise-value",
+        "enterprise-values",
+        "enterprisevalue",
+    ]
+    
+    params = {
+        "symbol": symbol,
+        "limit": limit,
+    }
+    
+    logger.info(f"Fetching enterprise value for {symbol} (limit={limit})")
+    
+    last_error = None
+    for endpoint_path in endpoints_to_try:
+        try:
+            data = _get_json(endpoint_path, params)
+            
+            if isinstance(data, list):
+                logger.info(f"Successfully fetched {len(data)} enterprise value record(s) for {symbol}")
+                return data
+            elif isinstance(data, dict):
+                # Some endpoints might return a single dict
+                logger.info(f"Successfully fetched enterprise value for {symbol}")
+                return [data]
+            else:
+                raise RuntimeError(
+                    f"FMP API returned unexpected data type for enterprise value: {type(data)}. "
+                    f"Expected list or dict."
+                )
+        
+        except RuntimeError as e:
+            last_error = e
+            # If it's a 404, try next endpoint
+            if "404" in str(e) or "Not Found" in str(e):
+                logger.debug(f"Endpoint {endpoint_path} returned 404, trying next...")
+                continue
+            else:
+                # Other errors, re-raise
+                raise
+    
+    # If all endpoints failed, provide helpful error message
+    if last_error and ("404" in str(last_error) or "Not Found" in str(last_error)):
+        raise RuntimeError(
+            f"Enterprise value endpoints are not available in FMP /stable API for {symbol}.\n"
+            f"Tried endpoints: {', '.join(endpoints_to_try)}\n"
+            f"\nPossible reasons:\n"
+            f"  - Enterprise value may require /api/v3 endpoints instead of /stable\n"
+            f"  - Enterprise value may require a higher subscription tier\n"
+            f"  - The endpoint name may be different in your plan\n"
+            f"\nYou can calculate enterprise value manually: EV = Market Cap + Total Debt - Cash"
+        )
+    elif last_error:
+        raise last_error
+    else:
+        raise RuntimeError(f"Failed to fetch enterprise value for {symbol}")
+
+
+def fetch_company_profile(symbol: str) -> Dict[str, Any]:
+    """
+    Fetch company profile data from FMP /stable API.
+    
+    Calls /stable/profile?symbol={symbol}
+    
+    Args:
+        symbol: Stock ticker symbol (e.g., "F" for Ford)
+        
+    Returns:
+        Dictionary with company profile data including:
+        - symbol
+        - companyName
+        - website
+        - image (logo URL)
+        - Other company metadata
+        
+    Raises:
+        RuntimeError: If API call fails or returns invalid data
+    """
+    path = "profile"
+    params = {
+        "symbol": symbol,
+    }
+    
+    logger.info(f"Fetching company profile for {symbol}")
+    
+    data = _get_json(path, params)
+    
+    # FMP profile endpoint typically returns a list with one item
+    if isinstance(data, list):
+        if len(data) > 0:
+            logger.info(f"Successfully fetched company profile for {symbol}")
+            return data[0]
+        else:
+            raise RuntimeError(f"FMP API returned empty list for {symbol} profile")
+    elif isinstance(data, dict):
+        logger.info(f"Successfully fetched company profile for {symbol}")
+        return data
+    else:
+        raise RuntimeError(
+            f"FMP API returned unexpected data type for company profile: {type(data)}. "
+            f"Expected list or dict."
+        )
+
+
+def fetch_available_sectors() -> List[str]:
+    """
+    Fetch available sectors from FMP /stable API.
+    
+    Calls /stable/available-sectors?apikey=...
+    
+    Returns:
+        List of sector name strings (e.g., ["Technology", "Healthcare", "Financial Services", ...])
+        
+    Raises:
+        RuntimeError: If API call fails or returns invalid data
+    """
+    path = "available-sectors"
+    params = {}
+    
+    logger.info("Fetching available sectors from FMP")
+    
+    data = _get_json(path, params)
+    
+    # FMP typically returns a list of strings
+    if isinstance(data, list):
+        # Filter out None/empty values and convert to strings
+        sectors = [str(s).strip() for s in data if s and str(s).strip()]
+        logger.info(f"Successfully fetched {len(sectors)} sectors")
+        return sectors
+    else:
+        raise RuntimeError(
+            f"FMP API returned unexpected data type for available sectors: {type(data)}. "
+            f"Expected a list."
+        )
+
+
+def fetch_available_industries() -> List[str]:
+    """
+    Fetch available industries from FMP /stable API.
+    
+    Calls /stable/available-industries?apikey=...
+    
+    Returns:
+        List of industry name strings (e.g., ["Consumer Electronics", "Banks—Regional", ...])
+        
+    Raises:
+        RuntimeError: If API call fails or returns invalid data
+    """
+    path = "available-industries"
+    params = {}
+    
+    logger.info("Fetching available industries from FMP")
+    
+    data = _get_json(path, params)
+    
+    # FMP typically returns a list of strings
+    if isinstance(data, list):
+        # Filter out None/empty values and convert to strings
+        industries = [str(i).strip() for i in data if i and str(i).strip()]
+        logger.info(f"Successfully fetched {len(industries)} industries")
+        return industries
+    else:
+        raise RuntimeError(
+            f"FMP API returned unexpected data type for available industries: {type(data)}. "
+            f"Expected a list."
+        )
+
+
+def fetch_company_screener(
+    sector: str | None = None,
+    industry: str | None = None,
+    market_cap_min: int | None = None,
+    market_cap_max: int | None = None,
+    limit: int = 100,
+    page: int = 0,
+) -> List[Dict[str, Any]]:
+    """
+    Fetch companies from FMP company screener using /stable API.
+    
+    Calls /stable/company-screener with optional filters for sector, industry, and market cap range.
+    
+    Args:
+        sector: Optional sector filter (e.g., "Technology")
+        industry: Optional industry filter (e.g., "Consumer Electronics")
+        market_cap_min: Optional minimum market cap in dollars
+        market_cap_max: Optional maximum market cap in dollars
+        limit: Number of results per page (default: 100)
+        page: Page number (0-indexed, default: 0)
+        
+    Returns:
+        List of company dictionaries from FMP screener response.
+        Each dict contains fields like: symbol, companyName, sector, industry, marketCap, etc.
+        
+    Raises:
+        RuntimeError: If API call fails or returns invalid data
+    """
+    path = "company-screener"
+    params = {}
+    
+    # Only include non-None parameters
+    if sector is not None and sector.strip():
+        params["sector"] = sector.strip()
+    if industry is not None and industry.strip():
+        params["industry"] = industry.strip()
+    if market_cap_min is not None:
+        params["marketCapMoreThan"] = market_cap_min
+    if market_cap_max is not None:
+        params["marketCapLowerThan"] = market_cap_max
+    
+    # Pagination parameters
+    params["limit"] = limit
+    params["page"] = page
+    
+    logger.info(
+        f"Fetching company screener results (sector={sector}, industry={industry}, "
+        f"marketCapMin={market_cap_min}, marketCapMax={market_cap_max}, "
+        f"limit={limit}, page={page})"
+    )
+    
+    data = _get_json(path, params)
+    
+    # FMP screener returns a list of company objects
+    if isinstance(data, list):
+        logger.info(f"Successfully fetched {len(data)} companies from screener")
+        return data
+    else:
+        raise RuntimeError(
+            f"FMP API returned unexpected data type for company screener: {type(data)}. "
+            f"Expected a list."
+        )
+
+
+def fetch_available_tickers() -> List[Dict[str, Any]]:
+    """
+    Fetch list of all available ticker symbols from FMP /stable API.
+    
+    Calls /stable/financial-statement-symbol-list?apikey=...
+    
+    Returns:
+        List of ticker dictionaries. Each dict contains:
+        - symbol: str (ticker symbol, e.g., "AAPL")
+        - companyName: str (company name)
+        - tradingCurrency: str (currency code, e.g., "USD")
+        - reportingCurrency: str (currency code for financial statements, e.g., "USD")
+        
+    Raises:
+        RuntimeError: If API call fails or returns invalid data
+    """
+    path = "financial-statement-symbol-list"
+    params = {}
+    
+    logger.info("Fetching available tickers from FMP")
+    
+    data = _get_json(path, params)
+    
+    # FMP returns a list of ticker objects
+    if isinstance(data, list):
+        logger.info(f"Successfully fetched {len(data)} tickers from FMP")
+        return data
+    else:
+        raise RuntimeError(
+            f"FMP API returned unexpected data type for available tickers: {type(data)}. "
+            f"Expected a list."
+        )
