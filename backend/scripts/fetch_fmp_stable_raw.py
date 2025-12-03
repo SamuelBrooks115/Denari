@@ -92,7 +92,6 @@ def main():
         logger.info(f"Wrote {len(cash_flow_data)} cash flow statement(s) to {cash_flow_file}")
         
         print(f"\n✓ Successfully fetched and cached FMP /stable data for {symbol}")
-<<<<<<< Updated upstream
         print(f"  Income Statement: {income_file}")
         print(f"  Balance Sheet: {balance_file}")
         print(f"  Cash Flow: {cash_flow_file}")
@@ -108,11 +107,6 @@ def main():
                 print(f"  Revenue: ${latest.get('revenue', 0):,.0f}")
             if latest.get('netIncome'):
                 print(f"  Net Income: ${latest.get('netIncome', 0):,.0f}")
-=======
-        print(f"  Income statement: {income_file} ({len(income_data)} periods)")
-        print(f"  Balance sheet: {balance_file} ({len(balance_data)} periods)")
-        print(f"  Cash flow: {cash_flow_file} ({len(cash_flow_data)} periods)")
->>>>>>> Stashed changes
     
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
