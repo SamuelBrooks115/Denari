@@ -13,28 +13,45 @@ Standalone script to fetch and export company screener results from FMP /stable 
 
 ### Usage
 
+**Interactive Mode (Recommended):**
+
+The interactive mode fetches available sectors and industries from FMP and lets you select from numbered lists, reducing typos and ambiguity.
+
+```powershell
+# Interactive mode - select from available lists
+poetry run python scripts/fetch_fmp_industry_screener.py `
+    --interactive `
+    --min-cap 10000000000 `
+    --max-cap 1000000000000 `
+    --output-json data/fmp_stable_raw/tech_companies.json
+```
+
+**Direct Mode:**
+
+You can also specify sector/industry names directly (must match FMP exactly):
+
 ```powershell
 # Search for Technology companies with market cap between $10B and $1T
-python scripts/fetch_fmp_industry_screener.py `
+poetry run python scripts/fetch_fmp_industry_screener.py `
     --sector "Technology" `
     --min-cap 10000000000 `
     --max-cap 1000000000000 `
     --output-json data/fmp_stable_raw/tech_companies.json
 
 # Search for specific industry
-python scripts/fetch_fmp_industry_screener.py `
+poetry run python scripts/fetch_fmp_industry_screener.py `
     --industry "Consumer Electronics" `
     --min-cap 100000000000 `
     --output-json data/fmp_stable_raw/consumer_electronics.json
 
 # Get all companies (no filters) with pagination
-python scripts/fetch_fmp_industry_screener.py `
+poetry run python scripts/fetch_fmp_industry_screener.py `
     --output-json data/fmp_stable_raw/all_companies_page1.json `
     --limit 200 `
     --page 0
 
 # Get next page
-python scripts/fetch_fmp_industry_screener.py `
+poetry run python scripts/fetch_fmp_industry_screener.py `
     --output-json data/fmp_stable_raw/all_companies_page2.json `
     --limit 200 `
     --page 1
@@ -42,13 +59,27 @@ python scripts/fetch_fmp_industry_screener.py `
 
 ### Arguments
 
-- `--sector` (optional) - Filter by sector (e.g., "Technology", "Healthcare")
-- `--industry` (optional) - Filter by industry (e.g., "Consumer Electronics", "Banks—Regional")
+- `--interactive` (optional) - Enable interactive mode to select sector/industry from available lists (recommended)
+- `--sector` (optional) - Filter by sector (e.g., "Technology", "Healthcare"). Use with `--interactive` to select from list, or specify directly.
+- `--industry` (optional) - Filter by industry (e.g., "Consumer Electronics", "Banks—Regional"). Use with `--interactive` to select from list, or specify directly.
 - `--min-cap` (optional) - Minimum market cap in dollars (e.g., 10000000000 for $10B)
 - `--max-cap` (optional) - Maximum market cap in dollars (e.g., 1000000000000 for $1T)
 - `--page` (optional, default: 0) - Page number (0-indexed)
 - `--limit` (optional, default: 100, max: 200) - Number of results per page
 - `--output-json` (optional, default: `data/fmp_stable_raw/screener_results.json`) - Output JSON file path
+
+### Interactive Mode
+
+When using `--interactive`, the script will:
+1. Fetch available sectors from FMP and display a numbered menu
+2. If you select a sector, fetch industries **only for that sector** and display a numbered menu
+3. If you skip the sector (select 0), show all available industries
+4. Allow you to select by entering the number (or 0 to skip)
+5. Use your selections in the screener query
+
+**Key Feature:** When you select a sector, the industry list is automatically filtered to show only industries that belong to that sector. For example, if you select "Healthcare", you won't see "Computer Hardware" in the industry list - only healthcare-related industries will be shown.
+
+This eliminates typos, ensures you're using valid sector/industry names, and prevents invalid sector/industry combinations.
 
 ### Output Structure
 
