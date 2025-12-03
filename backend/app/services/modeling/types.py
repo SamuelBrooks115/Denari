@@ -189,10 +189,15 @@ def build_company_model_input(json_data: Dict[str, Any]) -> CompanyModelInput:
     
     Extracts company info and builds historical series from line items.
     
+    Supports multiple JSON formats (all transformed to standard format):
+    - Standard format: {"company": {...}, "filings": [...]}
+    - Array format: [{date, symbol, revenue, ...}, ...] (transformed by load_structured_json)
+    
     Args:
         json_data: Structured JSON data with:
             - "company": Dict with "ticker" and "company_name"
             - "filings": List[Dict] (multi-year) OR "statements": Dict (single-year)
+            Note: Array format should be transformed via load_structured_json first
         
     Returns:
         CompanyModelInput with company info and historical data

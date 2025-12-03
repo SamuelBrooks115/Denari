@@ -60,7 +60,10 @@ try:
 except ImportError:
     OPENPYXL_AVAILABLE = False
 
-import xlsxwriter
+try:
+    import xlsxwriter
+    XLSXWRITER_AVAILABLE = True
+except ImportError:
 
 logger = get_logger(__name__)
 
@@ -154,14 +157,197 @@ def load_structured_json(path: str) -> Dict[str, Any]:
     """
     Load structured JSON file containing financial data.
     
+    This is the standard entry point for loading financial JSON files across the backend.
+    It handles multiple JSON formats and transforms them to a consistent standard format.
+    
+    Supported formats:
+    - Standard format: {"company": {...}, "filings": [...]}
+    - Array format: [{date, symbol, revenue, costOfRevenue, ...}, ...] 
+      (e.g., F_income_statement_stable_raw.json - the final structured output format)
+    
+    The array format is automatically transformed to standard format for compatibility
+    with existing code that expects the standard structure.
+    
     Args:
         path: Path to JSON file
         
     Returns:
-        Dictionary containing structured financial data
+        Dictionary containing structured financial data in standard format:
+        {
+            "company": {"ticker": str, "company_name": str},
+            "filings": [{
+                "statements": {
+                    "income_statement": {"line_items": [...]},
+                    ...
+                }
+            }]
+        }
     """
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    
+    # Check if it's an array format (like F_income_statement_stable_raw.json)
+    if isinstance(data, list) and len(data) > 0:
+        # Transform array format to standard format
+        return _transform_array_format_to_standard(data)
+    
+    return data
+
+
+def _transform_array_format_to_standard(data: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Transform array format JSON (the final structured output format) to standard format.
+    
+    This function handles the final structured output format used across the backend:
+    Array format: [{date, symbol, revenue, costOfRevenue, operatingIncome, ...}, ...]
+    
+    Transforms to standard format: 
+    {company: {...}, filings: [{statements: {income_statement: {line_items: [...]}}}]}
+    
+    Field mappings:
+    - revenue → IS_REVENUE
+    - costOfRevenue → IS_COGS
+    - operatingIncome → IS_OPERATING_INCOME
+    - interestExpense → IS_INTEREST_EXPENSE
+    - incomeTaxExpense → IS_TAX_EXPENSE
+    - netIncome → IS_NET_INCOME
+    - weightedAverageShsOutDil → IS_DILUTED_SHARES
+    - And other standard income statement fields
+    
+    Args:
+        data: List of period dictionaries (final structured output format)
+        
+    Returns:
+        Dictionary in standard format compatible with existing backend code
+    """
+    if not data:
+        return {"company": {}, "filings": []}
+    
+    # Extract company info from first period
+    first_period = data[0]
+    symbol = first_period.get("symbol", "").strip()
+    
+    # Field name to model_role mapping
+    FIELD_TO_MODEL_ROLE: Dict[str, Optional[str]] = {
+        "revenue": "IS_REVENUE",
+        "costOfRevenue": "IS_COGS",
+        "grossProfit": None,  # Computed, skip
+        "researchAndDevelopmentExpenses": "IS_OPERATING_EXPENSE",
+        "generalAndAdministrativeExpenses": "IS_OPERATING_EXPENSE",
+        "sellingAndMarketingExpenses": "IS_OPERATING_EXPENSE",
+        "sellingGeneralAndAdministrativeExpenses": "IS_OPERATING_EXPENSE",
+        "otherExpenses": "IS_OPERATING_EXPENSE",
+        "operatingExpenses": "IS_OPERATING_EXPENSE",
+        "costAndExpenses": None,  # Computed, skip
+        "netInterestIncome": None,  # Computed, skip
+        "interestIncome": None,  # Skip for now
+        "interestExpense": "IS_INTEREST_EXPENSE",
+        "depreciationAndAmortization": "CF_DEPRECIATION",  # Cash flow item, but may appear in IS
+        "ebitda": None,  # Computed, skip
+        "ebit": None,  # Computed, skip
+        "nonOperatingIncomeExcludingInterest": None,  # Skip for now
+        "operatingIncome": "IS_OPERATING_INCOME",
+        "totalOtherIncomeExpensesNet": None,  # Computed, skip
+        "incomeBeforeTax": None,  # Computed, skip
+        "incomeTaxExpense": "IS_TAX_EXPENSE",
+        "netIncomeFromContinuingOperations": None,  # Skip, use netIncome
+        "netIncomeFromDiscontinuedOperations": None,  # Skip
+        "otherAdjustmentsToNetIncome": None,  # Skip
+        "netIncome": "IS_NET_INCOME",
+        "netIncomeDeductions": None,  # Skip
+        "bottomLineNetIncome": None,  # Skip, use netIncome
+        "eps": None,  # Computed, skip
+        "epsDiluted": None,  # Computed, skip
+        "weightedAverageShsOut": None,  # Skip
+        "weightedAverageShsOutDil": "IS_DILUTED_SHARES",  # For EPS calculation
+    }
+    
+    # Field name to label mapping
+    FIELD_TO_LABEL: Dict[str, str] = {
+        "revenue": "Revenue",
+        "costOfRevenue": "Cost of Revenue",
+        "researchAndDevelopmentExpenses": "Research and Development Expenses",
+        "generalAndAdministrativeExpenses": "General and Administrative Expenses",
+        "sellingAndMarketingExpenses": "Selling and Marketing Expenses",
+        "sellingGeneralAndAdministrativeExpenses": "Selling, General and Administrative Expenses",
+        "otherExpenses": "Other Expenses",
+        "operatingExpenses": "Operating Expenses",
+        "interestExpense": "Interest Expense",
+        "depreciationAndAmortization": "Depreciation and Amortization",
+        "operatingIncome": "Operating Income",
+        "incomeTaxExpense": "Income Tax Expense",
+        "netIncome": "Net Income",
+        "weightedAverageShsOutDil": "Diluted Weighted Average Shares Outstanding",
+    }
+    
+    # Build line items
+    line_items: List[Dict[str, Any]] = []
+    line_items_by_field: Dict[str, Dict[str, Any]] = {}
+    
+    for period in data:
+        date_str = period.get("date", "")
+        if not date_str:
+            continue
+        
+        # Process each field
+        for field_name, value in period.items():
+            # Skip metadata fields
+            if field_name in ["date", "symbol", "reportedCurrency", "cik", "filingDate", 
+                             "acceptedDate", "fiscalYear", "period"]:
+                continue
+            
+            # Skip null values (but include zero values as they're meaningful in financial statements)
+            if value is None:
+                continue
+            
+            # Get model_role
+            model_role = FIELD_TO_MODEL_ROLE.get(field_name)
+            if not model_role:
+                continue
+            
+            # Get or create line item
+            if field_name not in line_items_by_field:
+                # Convert camelCase to Title Case
+                import re
+                label = FIELD_TO_LABEL.get(field_name, re.sub(r'([A-Z])', r' \1', field_name).strip().title())
+                line_item = {
+                    "tag": field_name,
+                    "label": label,
+                    "model_role": model_role,
+                    "unit": "USD",
+                    "periods": {}
+                }
+                line_items_by_field[field_name] = line_item
+                line_items.append(line_item)
+            
+            # Add period value (include zero values as they're meaningful in financial statements)
+            line_items_by_field[field_name]["periods"][date_str] = float(value)
+    
+    # Build standard format structure
+    result = {
+        "company": {
+            "ticker": symbol,
+            "company_name": symbol  # Use ticker as fallback, can be updated later
+        },
+        "filings": [
+            {
+                "filing_id": f"{symbol}_multi_year",
+                "filing_type": "10-K",
+                "fiscal_year": data[0].get("fiscalYear", ""),
+                "fiscal_period": "FY",
+                "statements": {
+                    "income_statement": {
+                        "statement_type": "income_statement",
+                        "normalized_order": 1,
+                        "line_items": line_items
+                    }
+                }
+            }
+        ]
+    }
+    
+    logger.info(f"Transformed array format JSON: {len(data)} periods -> {len(line_items)} line items")
+    return result
 
 
 def extract_line_items_from_json(json_data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -363,6 +549,211 @@ def write_year_headers(worksheet, year_column_map: Dict[int, int], header_row: i
         column_idx = year_column_map[year]
         cell = worksheet.cell(row=header_row, column=column_idx)
         cell.value = year
+
+
+def populate_dcf_year_headers(
+    workbook,
+    historical_years: List[int],
+    forecast_periods: int = 5
+) -> None:
+    """
+    Populate year headers for all three DCF sheets (DCF Base, DCF Bear, DCF Bull).
+    
+    Historical years (3 most recent) are written to columns D-F at row 16.
+    Forecasted years (5 years starting from last historical year + 1) are written to:
+    - Columns G-K at row 16
+    - Columns G-K at row 33
+    
+    Args:
+        workbook: openpyxl Workbook object
+        historical_years: List of historical years from JSON data
+        forecast_periods: Number of forecast years to generate (default 5)
+    """
+    if not historical_years:
+        logger.error("No historical years provided, cannot populate DCF year headers")
+        return
+    
+    # Extract 3 most recent historical years (sorted, take last 3)
+    sorted_historical = sorted(historical_years)
+    recent_years = sorted_historical[-3:] if len(sorted_historical) >= 3 else sorted_historical
+    logger.info(f"Using {len(recent_years)} historical years: {recent_years}")
+    
+    # Calculate forecasted years: [last_year + 1, last_year + 2, ..., last_year + forecast_periods]
+    last_historical_year = sorted_historical[-1]
+    forecasted_years = [last_historical_year + i for i in range(1, forecast_periods + 1)]
+    logger.info(f"Calculated {len(forecasted_years)} forecasted years: {forecasted_years}")
+    
+    # DCF sheet names
+    dcf_sheets = ["DCF Base", "DCF Bear", "DCF Bull"]
+    
+    # Historical year columns: D(4), E(5), F(6)
+    historical_columns = [4, 5, 6]
+    historical_row = 16
+    
+    # Forecasted year columns: G(7), H(8), I(9), J(10), K(11)
+    forecasted_columns = [7, 8, 9, 10, 11]
+    forecasted_rows = [16, 33]
+    
+    # Process each DCF sheet
+    for sheet_name in dcf_sheets:
+        if sheet_name not in workbook.sheetnames:
+            logger.warning(f"DCF sheet '{sheet_name}' not found, skipping")
+            continue
+        
+        worksheet = workbook[sheet_name]
+        logger.info(f"Populating year headers for sheet '{sheet_name}'")
+        
+        # Write historical years to columns D-F at row 16 (with "A" suffix)
+        for idx, year in enumerate(recent_years):
+            if idx < len(historical_columns):
+                col_idx = historical_columns[idx]
+                cell = worksheet.cell(row=historical_row, column=col_idx)
+                # Check if cell contains "Year"A"" placeholder (case-insensitive)
+                cell_value = str(cell.value or "").strip()
+                if "year" in cell_value.lower() and '"a"' in cell_value.lower():
+                    logger.debug(f"Replacing '{cell_value}' with {year} A at {sheet_name} row {historical_row}, column {col_idx}")
+                cell.value = f"{year} A"
+        
+        # Write forecasted years to columns G-K at rows 16 and 33 (with "E" suffix)
+        for row_idx in forecasted_rows:
+            for idx, year in enumerate(forecasted_years):
+                if idx < len(forecasted_columns):
+                    col_idx = forecasted_columns[idx]
+                    cell = worksheet.cell(row=row_idx, column=col_idx)
+                    # Check if cell contains "Year"E"" placeholder (case-insensitive)
+                    cell_value = str(cell.value or "").strip()
+                    if "year" in cell_value.lower() and '"e"' in cell_value.lower():
+                        logger.debug(f"Replacing '{cell_value}' with {year} E at {sheet_name} row {row_idx}, column {col_idx}")
+                    cell.value = f"{year} E"
+        
+        logger.info(f"Populated year headers for '{sheet_name}': Historical={recent_years}, Forecasted={forecasted_years}")
+
+
+def populate_three_statement_year_headers(
+    worksheet,
+    historical_years: List[int],
+    forecast_periods: int = 5,
+    income_statement_end_row: Optional[int] = None
+) -> None:
+    """
+    Populate year headers for the 3-Statement model sheet ("3-STMT A").
+    
+    Historical years (3 most recent) are written to columns D-F.
+    Forecasted years (5 years starting from last historical year + 1) are written to columns G-K.
+    
+    Year header locations:
+    - Income Statement: Always row 5
+    - Balance Sheet: Row containing "Assets" (found dynamically, starting after income_statement_end_row if provided)
+    - Cash Flow: Row containing "Cash Flows from Operating Activities" (found dynamically)
+    
+    Args:
+        worksheet: openpyxl Worksheet object for "3-STMT A" sheet
+        historical_years: List of historical years from JSON data
+        forecast_periods: Number of forecast years to generate (default 5)
+        income_statement_end_row: Optional row number where Income Statement ends (Balance Sheet search starts after this)
+    """
+    if not historical_years:
+        logger.error("No historical years provided, cannot populate 3-statement year headers")
+        return
+    
+    # Extract 3 most recent historical years (sorted, take last 3)
+    sorted_historical = sorted(historical_years)
+    recent_years = sorted_historical[-3:] if len(sorted_historical) >= 3 else sorted_historical
+    logger.info(f"Using {len(recent_years)} historical years for 3-statement: {recent_years}")
+    
+    # Calculate forecasted years: [last_year + 1, last_year + 2, ..., last_year + forecast_periods]
+    last_historical_year = sorted_historical[-1]
+    forecasted_years = [last_historical_year + i for i in range(1, forecast_periods + 1)]
+    logger.info(f"Calculated {len(forecasted_years)} forecasted years for 3-statement: {forecasted_years}")
+    
+    # Historical year columns: D(4), E(5), F(6)
+    historical_columns = [4, 5, 6]
+    # Forecasted year columns: G(7), H(8), I(9), J(10), K(11)
+    forecasted_columns = [7, 8, 9, 10, 11]
+    
+    # 1. Income Statement: Always row 5
+    income_statement_row = 5
+    logger.info(f"Populating Income Statement year headers at row {income_statement_row}")
+    
+    # Write historical years to columns D-F (with "A" suffix)
+    for idx, year in enumerate(recent_years):
+        if idx < len(historical_columns):
+            col_idx = historical_columns[idx]
+            cell = worksheet.cell(row=income_statement_row, column=col_idx)
+            cell_value = str(cell.value or "").strip()
+            if "year" in cell_value.lower() and '"a"' in cell_value.lower():
+                logger.debug(f"Replacing '{cell_value}' with {year} A at Income Statement row {income_statement_row}, column {col_idx}")
+            cell.value = f"{year} A"
+    
+    # Write forecasted years to columns G-K (with "E" suffix)
+    for idx, year in enumerate(forecasted_years):
+        if idx < len(forecasted_columns):
+            col_idx = forecasted_columns[idx]
+            cell = worksheet.cell(row=income_statement_row, column=col_idx)
+            cell_value = str(cell.value or "").strip()
+            if "year" in cell_value.lower() and '"e"' in cell_value.lower():
+                logger.debug(f"Replacing '{cell_value}' with {year} E at Income Statement row {income_statement_row}, column {col_idx}")
+            cell.value = f"{year} E"
+    
+    # 2. Balance Sheet: Find "Assets" row (start search after Income Statement if provided)
+    if income_statement_end_row:
+        search_start_row = income_statement_end_row + 1
+        assets_row = find_statement_section_start(worksheet, "Assets", start_row=search_start_row)
+    else:
+        assets_row = find_statement_section_start(worksheet, "Assets")
+    if assets_row:
+        logger.info(f"Found Assets row at {assets_row}, populating Balance Sheet year headers")
+        
+        # Write historical years to columns D-F (with "A" suffix)
+        for idx, year in enumerate(recent_years):
+            if idx < len(historical_columns):
+                col_idx = historical_columns[idx]
+                cell = worksheet.cell(row=assets_row, column=col_idx)
+                cell_value = str(cell.value or "").strip()
+                if "year" in cell_value.lower() and '"a"' in cell_value.lower():
+                    logger.debug(f"Replacing '{cell_value}' with {year} A at Assets row {assets_row}, column {col_idx}")
+                cell.value = f"{year} A"
+        
+        # Write forecasted years to columns G-K (with "E" suffix)
+        for idx, year in enumerate(forecasted_years):
+            if idx < len(forecasted_columns):
+                col_idx = forecasted_columns[idx]
+                cell = worksheet.cell(row=assets_row, column=col_idx)
+                cell_value = str(cell.value or "").strip()
+                if "year" in cell_value.lower() and '"e"' in cell_value.lower():
+                    logger.debug(f"Replacing '{cell_value}' with {year} E at Assets row {assets_row}, column {col_idx}")
+                cell.value = f"{year} E"
+    else:
+        logger.warning("Could not find 'Assets' row for Balance Sheet year headers")
+    
+    # 3. Cash Flow: Find "Cash Flows from Operating Activities" row
+    operating_activities_row = find_statement_section_start(worksheet, "Cash Flows from Operating Activities")
+    if operating_activities_row:
+        logger.info(f"Found Cash Flows from Operating Activities row at {operating_activities_row}, populating Cash Flow year headers")
+        
+        # Write historical years to columns D-F (with "A" suffix)
+        for idx, year in enumerate(recent_years):
+            if idx < len(historical_columns):
+                col_idx = historical_columns[idx]
+                cell = worksheet.cell(row=operating_activities_row, column=col_idx)
+                cell_value = str(cell.value or "").strip()
+                if "year" in cell_value.lower() and '"a"' in cell_value.lower():
+                    logger.debug(f"Replacing '{cell_value}' with {year} A at Cash Flows from Operating Activities row {operating_activities_row}, column {col_idx}")
+                cell.value = f"{year} A"
+        
+        # Write forecasted years to columns G-K (with "E" suffix)
+        for idx, year in enumerate(forecasted_years):
+            if idx < len(forecasted_columns):
+                col_idx = forecasted_columns[idx]
+                cell = worksheet.cell(row=operating_activities_row, column=col_idx)
+                cell_value = str(cell.value or "").strip()
+                if "year" in cell_value.lower() and '"e"' in cell_value.lower():
+                    logger.debug(f"Replacing '{cell_value}' with {year} E at Cash Flows from Operating Activities row {operating_activities_row}, column {col_idx}")
+                cell.value = f"{year} E"
+    else:
+        logger.warning("Could not find 'Cash Flows from Operating Activities' row for Cash Flow year headers")
+    
+    logger.info(f"Populated 3-statement year headers: Historical={recent_years}, Forecasted={forecasted_years}")
 
 
 def overwrite_year_headers_in_statement_section(
@@ -593,6 +984,711 @@ def _get_current_stock_price(ticker: str, use_fake_data: bool = False) -> Tuple[
         return None, None
 
 
+def _extract_income_statement_items(financial_json: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Extract income statement line items from financial JSON.
+    
+    Args:
+        financial_json: JSON data structure with filings -> statements -> income_statement -> line_items
+        
+    Returns:
+        List of income statement line items
+    """
+    try:
+        filings = financial_json.get("filings", [])
+        if not filings:
+            logger.warning("No filings found in JSON")
+            return []
+        
+        # Get first filing (most recent)
+        filing = filings[0]
+        statements = filing.get("statements", {})
+        income_statement = statements.get("income_statement", {})
+        line_items = income_statement.get("line_items", [])
+        
+        return line_items
+    except (KeyError, TypeError) as e:
+        logger.error(f"Error extracting income statement items: {e}")
+        return []
+
+
+def _get_period_mapping(line_items: List[Dict[str, Any]]) -> Dict[str, int]:
+    """
+    Extract periods from line items and map the 3 most recent to columns D, E, F.
+    
+    Args:
+        line_items: List of line item dictionaries
+        
+    Returns:
+        Dictionary mapping period date (YYYY-MM-DD) -> column index (D=4, E=5, F=6)
+    """
+    all_periods = set()
+    
+    for item in line_items:
+        periods = item.get("periods", {})
+        all_periods.update(periods.keys())
+    
+    if not all_periods:
+        logger.warning("No periods found in line items")
+        return {}
+    
+    # Sort periods descending (most recent first)
+    sorted_periods = sorted(all_periods, reverse=True)
+    
+    # Take 3 most recent
+    recent_periods = sorted_periods[:3]
+    
+    # Map to columns: D=4 (most recent), E=5 (middle), F=6 (oldest)
+    period_mapping = {}
+    for idx, period in enumerate(recent_periods):
+        column_idx = 4 + idx  # D=4, E=5, F=6
+        period_mapping[period] = column_idx
+    
+    logger.debug(f"Mapped periods to columns: {period_mapping}")
+    return period_mapping
+
+
+def _classify_line_item(item: Dict[str, Any]) -> str:
+    """
+    Classify a line item into a category based on model_role and label.
+    
+    Args:
+        item: Line item dictionary
+        
+    Returns:
+        Category string: "revenue", "cogs", "operating_expense", "operating_income", 
+                        "interest", "tax", "net_income", "section_a", "section_b", "section_c"
+    """
+    model_role = (item.get("model_role") or "").strip().upper()
+    label = (item.get("label") or "").strip().lower()
+    tag = (item.get("tag") or "").strip().lower()
+    
+    # Primary classification by model_role
+    if model_role == "IS_REVENUE":
+        return "revenue"
+    elif model_role == "IS_COGS":
+        return "cogs"
+    elif model_role == "IS_OPERATING_EXPENSE":
+        return "operating_expense"
+    elif model_role == "IS_OPERATING_INCOME":
+        return "operating_income"
+    elif model_role == "IS_INTEREST_EXPENSE" or "INTEREST" in model_role:
+        return "interest"
+    elif model_role == "IS_TAX_EXPENSE" or "TAX" in model_role:
+        return "tax"
+    elif model_role == "IS_NET_INCOME":
+        return "net_income"
+    
+    # Fallback: fuzzy matching on label/tag
+    text = f"{label} {tag}".lower()
+    
+    if any(word in text for word in ["revenue", "sales", "net sales", "total revenue"]):
+        return "revenue"
+    elif any(word in text for word in ["cogs", "cost of goods", "cost of sales", "cost of revenue"]):
+        return "cogs"
+    elif any(word in text for word in ["operating expense", "opex", "sg&a", "operating cost"]):
+        return "operating_expense"
+    elif any(word in text for word in ["operating income", "operating profit", "ebit"]):
+        return "operating_income"
+    elif any(word in text for word in ["interest expense", "interest cost"]):
+        return "interest"
+    elif any(word in text for word in ["tax expense", "income tax", "tax provision"]):
+        return "tax"
+    elif any(word in text for word in ["net income", "net profit", "net earnings"]):
+        return "net_income"
+    
+    # Default classification for dynamic sections
+    # Section A: items that might appear before gross income (unusual income, cost of services, etc.)
+    # Section B: operating-related items
+    # Section C: non-operating items (gains, losses, other income/expense)
+    
+    if any(word in text for word in ["gain", "loss", "other income", "other expense", "non-operating"]):
+        return "section_c"
+    elif any(word in text for word in ["depreciation", "amortization", "restructuring", "impairment"]):
+        return "section_b"  # Operating-related
+    else:
+        # Default to section A if unclear
+        return "section_a"
+
+
+def _find_diluted_shares(line_items: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Find diluted shares line item from income statement or other statements.
+    
+    Args:
+        line_items: List of line items (may include non-income statement items)
+        
+    Returns:
+        Line item dictionary if found, None otherwise
+    """
+    for item in line_items:
+        tag = (item.get("tag") or "").strip().lower()
+        label = (item.get("label") or "").strip().lower()
+        model_role = (item.get("model_role") or "").strip().upper()
+        
+        text = f"{tag} {label}".lower()
+        
+        if any(word in text for word in ["diluted shares", "diluted share", "shares outstanding", "weighted average shares"]):
+            return item
+        elif model_role and "SHARES" in model_role:
+            return item
+    
+    return None
+
+
+def populate_income_statement(
+    worksheet,
+    financial_json: Dict[str, Any],
+    start_row: int = 6
+) -> int:
+    """
+    Populate Income Statement with fixed layout starting at B6 (or specified start_row).
+    
+    Fixed layout:
+    - Revenue
+    - Dynamic Section A items (pre-gross-profit)
+    - Gross Income (formula)
+    - Gross Margin % (formula)
+    - Dynamic Section B items (operating expenses)
+    - Operating Income
+    - Operating Margin % (formula)
+    - Dynamic Section C items (non-operating)
+    - Income before Taxes (formula)
+    - Income Tax Expense
+    - Net Income
+    - Net Income Margin % (formula)
+    - EPS (formula, if diluted shares available)
+    
+    Args:
+        worksheet: openpyxl Worksheet object
+        financial_json: JSON data structure with filings -> statements -> income_statement -> line_items
+        start_row: Starting row number (default 6, which is B6)
+        
+    Returns:
+        Last row number used (after Income Statement ends, including EPS and diluted shares if present)
+    """
+    # Extract income statement items
+    line_items = _extract_income_statement_items(financial_json)
+    if not line_items:
+        logger.warning("No income statement line items found")
+        return start_row
+    
+    # Get period mapping (3 most recent periods -> columns C, D, E)
+    period_mapping = _get_period_mapping(line_items)
+    if not period_mapping:
+        logger.warning("No periods found for income statement")
+        return start_row
+    
+    # Classify all line items
+    classified_items = {}
+    for item in line_items:
+        category = _classify_line_item(item)
+        if category not in classified_items:
+            classified_items[category] = []
+        classified_items[category].append(item)
+    
+    # Track row numbers for formulas
+    current_row = start_row
+    revenue_row = None
+    cogs_row = None
+    gross_income_row = None
+    operating_income_row = None
+    interest_row = None
+    income_before_taxes_row = None
+    tax_expense_row = None
+    net_income_row = None
+    diluted_shares_row = None
+    
+    # Helper function to write values and label for a line item
+    def write_line_item_values(row: int, item: Dict[str, Any], write_label: bool = True) -> None:
+        # Always write label to column B if requested (assume column B is empty for line items)
+        if write_label:
+            label_cell = worksheet.cell(row=row, column=2)  # Column B
+            label = item.get("label", "").strip()
+            if label:
+                label_cell.value = label
+                logger.debug(f"Wrote label '{label}' to column B at row {row}")
+        
+        # Write values to columns D, E, F
+        periods = item.get("periods", {})
+        for period_date, column_idx in period_mapping.items():
+            if period_date in periods:
+                value = periods[period_date]
+                if value is not None:
+                    cell = worksheet.cell(row=row, column=column_idx)
+                    cell.value = float(value)
+                    cell.number_format = "General"
+    
+    # Helper function to write label for computed rows
+    def write_computed_label(row: int, label: str) -> None:
+        """Write label for computed/formula rows (Gross Income, margins, etc.)"""
+        label_cell = worksheet.cell(row=row, column=2)  # Column B
+        label_cell.value = label
+        logger.debug(f"Wrote computed label '{label}' to column B at row {row}")
+    
+    # 1. Revenue (row 6 or start_row)
+    revenue_items = classified_items.get("revenue", [])
+    if revenue_items:
+        revenue_item = revenue_items[0]  # Take first revenue item
+        revenue_row = current_row
+        write_line_item_values(revenue_row, revenue_item, write_label=True)  # Write label from JSON
+        logger.debug(f"Wrote Revenue at row {revenue_row}")
+        current_row += 1
+    else:
+        logger.warning("No Revenue item found")
+        revenue_row = current_row
+        current_row += 1
+    
+    # 2. Dynamic Section A: Items between Revenue and Gross Income
+    section_a_items = classified_items.get("section_a", [])
+    for item in section_a_items:
+        write_line_item_values(current_row, item, write_label=True)  # Replace "Line Item" placeholder
+        logger.debug(f"Wrote Section A item '{item.get('label')}' at row {current_row}")
+        current_row += 1
+    
+    # 3. Gross Income (formula: Revenue - COGS)
+    cogs_items = classified_items.get("cogs", [])
+    if cogs_items:
+        cogs_item = cogs_items[0]
+        cogs_row = current_row
+        write_line_item_values(cogs_row, cogs_item, write_label=True)  # Replace "Line Item" placeholder
+        logger.debug(f"Wrote COGS at row {cogs_row}")
+        current_row += 1
+    
+    gross_income_row = current_row
+    if revenue_row and cogs_row:
+        # Write label for Gross Income
+        write_computed_label(gross_income_row, "Gross Income")
+        
+        # Formula: Revenue - COGS for each column
+        for period_date, column_idx in period_mapping.items():
+            formula = f"={get_column_letter(column_idx)}{revenue_row}-{get_column_letter(column_idx)}{cogs_row}"
+            cell = worksheet.cell(row=gross_income_row, column=column_idx)
+            cell.value = formula
+            cell.number_format = "General"
+        logger.debug(f"Wrote Gross Income formula at row {gross_income_row}")
+    current_row += 1
+    
+    # 4. Gross Margin % (formula: Gross Income / Revenue)
+    gross_margin_row = current_row
+    if revenue_row and gross_income_row:
+        # Write label for Gross Margin %
+        write_computed_label(gross_margin_row, "Gross Margin %")
+        
+        for period_date, column_idx in period_mapping.items():
+            formula = f"={get_column_letter(column_idx)}{gross_income_row}/{get_column_letter(column_idx)}{revenue_row}"
+            cell = worksheet.cell(row=gross_margin_row, column=column_idx)
+            cell.value = formula
+            cell.number_format = "0.00%"  # Percentage format
+        logger.debug(f"Wrote Gross Margin % formula at row {gross_margin_row}")
+    current_row += 1
+    
+    # 5. Dynamic Section B: Operating Expenses (between Gross Margin % and Operating Income)
+    section_b_items = classified_items.get("operating_expense", []) + classified_items.get("section_b", [])
+    for item in section_b_items:
+        write_line_item_values(current_row, item, write_label=True)  # Replace "Line Item" placeholder
+        logger.debug(f"Wrote Section B item '{item.get('label')}' at row {current_row}")
+        current_row += 1
+    
+    # 6. Operating Income
+    operating_items = classified_items.get("operating_income", [])
+    if operating_items:
+        operating_item = operating_items[0]
+        operating_income_row = current_row
+        write_line_item_values(operating_income_row, operating_item, write_label=True)  # Write label from JSON
+        logger.debug(f"Wrote Operating Income at row {operating_income_row}")
+        current_row += 1
+    else:
+        logger.warning("No Operating Income item found")
+        operating_income_row = current_row
+        current_row += 1
+    
+    # 7. Operating Margin % (formula: Operating Income / Revenue)
+    operating_margin_row = current_row
+    if revenue_row and operating_income_row:
+        # Write label for Operating Margin %
+        write_computed_label(operating_margin_row, "Operating Margin %")
+        
+        for period_date, column_idx in period_mapping.items():
+            formula = f"={get_column_letter(column_idx)}{operating_income_row}/{get_column_letter(column_idx)}{revenue_row}"
+            cell = worksheet.cell(row=operating_margin_row, column=column_idx)
+            cell.value = formula
+            cell.number_format = "0.00%"  # Percentage format
+        logger.debug(f"Wrote Operating Margin % formula at row {operating_margin_row}")
+    current_row += 1
+    
+    # 8. Dynamic Section C: Non-operating items (between Operating Margin % and Income Before Taxes)
+    section_c_items = classified_items.get("interest", []) + classified_items.get("section_c", [])
+    for item in section_c_items:
+        # Track interest row for Income before Taxes formula
+        if item.get("model_role", "").upper() == "IS_INTEREST_EXPENSE" or "interest" in (item.get("label") or "").lower():
+            if interest_row is None:
+                interest_row = current_row
+        write_line_item_values(current_row, item, write_label=True)  # Replace "Line Item" placeholder
+        logger.debug(f"Wrote Section C item '{item.get('label')}' at row {current_row}")
+        current_row += 1
+    
+    # 9. Income before Taxes (formula: Operating Income - Interest Expense)
+    income_before_taxes_row = current_row
+    if operating_income_row:
+        # Write label for Income before Taxes
+        write_computed_label(income_before_taxes_row, "Income before Taxes")
+        
+        if interest_row:
+            # Formula: Operating Income - Interest Expense
+            for period_date, column_idx in period_mapping.items():
+                formula = f"={get_column_letter(column_idx)}{operating_income_row}-{get_column_letter(column_idx)}{interest_row}"
+                cell = worksheet.cell(row=income_before_taxes_row, column=column_idx)
+                cell.value = formula
+                cell.number_format = "General"
+        else:
+            # No interest expense, Income before Taxes = Operating Income
+            for period_date, column_idx in period_mapping.items():
+                formula = f"={get_column_letter(column_idx)}{operating_income_row}"
+                cell = worksheet.cell(row=income_before_taxes_row, column=column_idx)
+                cell.value = formula
+                cell.number_format = "General"
+        logger.debug(f"Wrote Income before Taxes formula at row {income_before_taxes_row}")
+    current_row += 1
+    
+    # 10. Income Tax Expense
+    tax_items = classified_items.get("tax", [])
+    if tax_items:
+        tax_item = tax_items[0]
+        tax_expense_row = current_row
+        write_line_item_values(tax_expense_row, tax_item, write_label=True)  # Write label from JSON
+        logger.debug(f"Wrote Income Tax Expense at row {tax_expense_row}")
+        current_row += 1
+    else:
+        logger.warning("No Income Tax Expense item found")
+        tax_expense_row = current_row
+        current_row += 1
+    
+    # 11. Net Income
+    net_income_items = classified_items.get("net_income", [])
+    if net_income_items:
+        net_income_item = net_income_items[0]
+        net_income_row = current_row
+        write_line_item_values(net_income_row, net_income_item, write_label=True)  # Write label from JSON
+        logger.debug(f"Wrote Net Income at row {net_income_row}")
+        current_row += 1
+    else:
+        logger.warning("No Net Income item found")
+        net_income_row = current_row
+        current_row += 1
+    
+    # 12. Net Income Margin % (formula: Net Income / Revenue)
+    net_margin_row = current_row
+    if revenue_row and net_income_row:
+        # Write label for Net Income Margin %
+        write_computed_label(net_margin_row, "Net Income Margin %")
+        
+        for period_date, column_idx in period_mapping.items():
+            formula = f"={get_column_letter(column_idx)}{net_income_row}/{get_column_letter(column_idx)}{revenue_row}"
+            cell = worksheet.cell(row=net_margin_row, column=column_idx)
+            cell.value = formula
+            cell.number_format = "0.00%"  # Percentage format
+        logger.debug(f"Wrote Net Income Margin % formula at row {net_margin_row}")
+    current_row += 1
+    
+    # 13. EPS (formula: Net Income / Diluted Shares, if available)
+    # Try to find diluted shares in income statement items or all line items
+    all_items = _extract_income_statement_items(financial_json)
+    diluted_shares_item = _find_diluted_shares(all_items)
+    
+    if not diluted_shares_item:
+        # Try searching in all statements
+        try:
+            filings = financial_json.get("filings", [])
+            if filings:
+                statements = filings[0].get("statements", {})
+                all_statements_items = []
+                for stmt_type, stmt_data in statements.items():
+                    if isinstance(stmt_data, dict):
+                        all_statements_items.extend(stmt_data.get("line_items", []))
+                diluted_shares_item = _find_diluted_shares(all_statements_items)
+        except Exception as e:
+            logger.debug(f"Could not search all statements for diluted shares: {e}")
+    
+    eps_row = current_row
+    if net_income_row and diluted_shares_item:
+        # Write label for EPS
+        write_computed_label(eps_row, "EPS")
+        
+        diluted_shares_row = current_row + 1  # Place diluted shares row after EPS for reference
+        write_line_item_values(diluted_shares_row, diluted_shares_item, write_label=True)
+        current_row = diluted_shares_row + 1  # Update current_row to include diluted shares row
+        
+        # Formula: Net Income / Diluted Shares
+        for period_date, column_idx in period_mapping.items():
+            formula = f"={get_column_letter(column_idx)}{net_income_row}/{get_column_letter(column_idx)}{diluted_shares_row}"
+            cell = worksheet.cell(row=eps_row, column=column_idx)
+            cell.value = formula
+            cell.number_format = "General"
+        logger.debug(f"Wrote EPS formula at row {eps_row}")
+    else:
+        # Still write EPS label even if diluted shares not found
+        write_computed_label(eps_row, "EPS")
+        current_row += 1  # Move to next row after EPS
+        logger.debug("Diluted shares not found, leaving EPS blank")
+    
+    last_row = current_row - 1  # Last row used (current_row is already incremented)
+    logger.info(f"Populated Income Statement starting at row {start_row}, ending at row {last_row}")
+    return last_row
+
+
+def populate_income_statement_values(
+    worksheet,
+    financial_data: Dict[str, Any],
+    year_column_map: Dict[int, int],
+    start_row: int = 6,
+    use_formulas: bool = False
+) -> int:
+    """
+    Populate Income Statement with values directly, calculating margins as values (not formulas).
+    
+    This function dynamically writes income statement data to Excel, calculating margins
+    as actual values rather than Excel formulas. Works with both FMP format and structured JSON.
+    
+    Args:
+        worksheet: openpyxl Worksheet object
+        financial_data: Can be either:
+            - FMP format: {"income_statements": [{date, revenue, costOfRevenue, ...}, ...]}
+            - Structured JSON: {"filings": [{"statements": {"income_statement": {"line_items": [...]}}}]}
+        year_column_map: Dictionary mapping year -> column_index (e.g., {2023: 4, 2024: 5, 2025: 6})
+        start_row: Starting row number (default 6)
+        use_formulas: If True, uses Excel formulas; if False, calculates values directly (default False)
+        
+    Returns:
+        Last row number used
+    """
+    # Extract periods and values - handle both FMP and structured formats
+    periods_data: List[Dict[str, Any]] = []
+    
+    # Check if it's FMP format (has income_statements array)
+    if "income_statements" in financial_data:
+        periods_data = financial_data["income_statements"]
+    # Check if it's structured JSON format
+    elif "filings" in financial_data:
+        line_items = _extract_income_statement_items(financial_data)
+        if line_items:
+            # Convert line items to period-based format
+            all_periods = set()
+            for item in line_items:
+                periods = item.get("periods", {})
+                all_periods.update(periods.keys())
+            
+            # Build period dictionaries from line items
+            for period_date in sorted(all_periods, reverse=True)[:3]:  # 3 most recent
+                period_dict: Dict[str, Any] = {"date": period_date}
+                for item in line_items:
+                    periods = item.get("periods", {})
+                    if period_date in periods:
+                        tag = item.get("tag", "")
+                        value = periods[period_date]
+                        if tag:
+                            period_dict[tag] = value
+                periods_data.append(period_dict)
+    
+    if not periods_data:
+        logger.warning("No income statement data found")
+        return start_row
+    
+    # Get 3 most recent periods
+    periods = periods_data[:3] if len(periods_data) >= 3 else periods_data
+    
+    # Extract years and map to columns
+    period_year_map: Dict[str, int] = {}  # period_date -> year
+    for period in periods:
+        date_str = period.get("date", "")
+        if date_str:
+            year = int(str(date_str).split("-")[0])
+            period_year_map[date_str] = year
+    
+    if not period_year_map:
+        logger.warning("Could not extract years from income statement data")
+        return start_row
+    
+    current_row = start_row
+    
+    # Helper to write value to a column for a specific period
+    def write_value(row: int, value: Optional[float], period_date: str) -> None:
+        if value is not None and period_date in period_year_map:
+            year = period_year_map[period_date]
+            if year in year_column_map:
+                target_col = year_column_map[year]
+                cell = worksheet.cell(row=row, column=target_col)
+                cell.value = float(value)
+                cell.number_format = "General"
+    
+    # Helper to write calculated margin value
+    def write_margin_value(row: int, numerator: Optional[float], denominator: Optional[float], period_date: str) -> None:
+        if numerator is not None and denominator is not None and denominator != 0:
+            if period_date in period_year_map:
+                year = period_year_map[period_date]
+                if year in year_column_map:
+                    margin_pct = numerator / denominator
+                    cell = worksheet.cell(row=row, column=year_column_map[year])
+                    cell.value = margin_pct
+                    cell.number_format = "0.00%"
+    
+    # Map FMP field names to standard field names
+    def get_field_value(period: Dict[str, Any], field_name: str) -> Optional[float]:
+        # Try direct field name first
+        value = period.get(field_name)
+        if value is not None:
+            return float(value)
+        # Try camelCase variations
+        camel_variations = {
+            "revenue": ["revenue"],
+            "cost_of_revenue": ["costOfRevenue", "cost_of_revenue"],
+            "operating_expenses": ["operatingExpenses", "operating_expenses"],
+            "operating_income": ["operatingIncome", "operating_income"],
+            "interest_expense": ["interestExpense", "interest_expense"],
+            "income_tax_expense": ["incomeTaxExpense", "income_tax_expense"],
+            "net_income": ["netIncome", "net_income"],
+        }
+        if field_name in camel_variations:
+            for variant in camel_variations[field_name]:
+                value = period.get(variant)
+                if value is not None:
+                    return float(value)
+        return None
+    
+    # 1. Revenue
+    revenue_row = current_row
+    label_cell = worksheet.cell(row=revenue_row, column=2)
+    label_cell.value = "Revenue"
+    for period in periods:
+        date_str = period.get("date", "")
+        if date_str:
+            revenue = get_field_value(period, "revenue")
+            write_value(revenue_row, revenue, date_str)
+    current_row += 1
+    
+    # 2. Cost of Revenue
+    cogs_row = current_row
+    label_cell = worksheet.cell(row=cogs_row, column=2)
+    label_cell.value = "Cost of Revenue"
+    for period in periods:
+        date_str = period.get("date", "")
+        if date_str:
+            cogs = get_field_value(period, "cost_of_revenue")
+            write_value(cogs_row, cogs, date_str)
+    current_row += 1
+    
+    # 3. Gross Income (calculated value)
+    gross_income_row = current_row
+    label_cell = worksheet.cell(row=gross_income_row, column=2)
+    label_cell.value = "Gross Income"
+    for period in periods:
+        date_str = period.get("date", "")
+        if date_str:
+            revenue = get_field_value(period, "revenue")
+            cogs = get_field_value(period, "cost_of_revenue")
+            if revenue is not None and cogs is not None:
+                gross_income = revenue - cogs
+                write_value(gross_income_row, gross_income, date_str)
+    current_row += 1
+    
+    # 4. Gross Margin % (calculated value)
+    gross_margin_row = current_row
+    label_cell = worksheet.cell(row=gross_margin_row, column=2)
+    label_cell.value = "Gross Margin %"
+    for period in periods:
+        date_str = period.get("date", "")
+        if date_str:
+            revenue = get_field_value(period, "revenue")
+            cogs = get_field_value(period, "cost_of_revenue")
+            if revenue is not None and cogs is not None:
+                gross_income = revenue - cogs
+                write_margin_value(gross_margin_row, gross_income, revenue, date_str)
+    current_row += 1
+    
+    # 5. Operating Expenses
+    opex_row = current_row
+    label_cell = worksheet.cell(row=opex_row, column=2)
+    label_cell.value = "Operating Expenses"
+    for period in periods:
+        date_str = period.get("date", "")
+        if date_str:
+            opex = get_field_value(period, "operating_expenses")
+            write_value(opex_row, opex, date_str)
+    current_row += 1
+    
+    # 6. Operating Income
+    operating_income_row = current_row
+    label_cell = worksheet.cell(row=operating_income_row, column=2)
+    label_cell.value = "Operating Income"
+    for period in periods:
+        date_str = period.get("date", "")
+        if date_str:
+            operating_income = get_field_value(period, "operating_income")
+            write_value(operating_income_row, operating_income, date_str)
+    current_row += 1
+    
+    # 7. Operating Margin % (calculated value)
+    operating_margin_row = current_row
+    label_cell = worksheet.cell(row=operating_margin_row, column=2)
+    label_cell.value = "Operating Margin %"
+    for period in periods:
+        date_str = period.get("date", "")
+        if date_str:
+            revenue = get_field_value(period, "revenue")
+            operating_income = get_field_value(period, "operating_income")
+            write_margin_value(operating_margin_row, operating_income, revenue, date_str)
+    current_row += 1
+    
+    # 8. Interest Expense
+    interest_row = current_row
+    label_cell = worksheet.cell(row=interest_row, column=2)
+    label_cell.value = "Interest Expense"
+    for period in periods:
+        date_str = period.get("date", "")
+        if date_str:
+            interest = get_field_value(period, "interest_expense")
+            write_value(interest_row, interest, date_str)
+    current_row += 1
+    
+    # 9. Income Tax Expense
+    tax_row = current_row
+    label_cell = worksheet.cell(row=tax_row, column=2)
+    label_cell.value = "Income Tax Expense"
+    for period in periods:
+        date_str = period.get("date", "")
+        if date_str:
+            tax = get_field_value(period, "income_tax_expense")
+            write_value(tax_row, tax, date_str)
+    current_row += 1
+    
+    # 10. Net Income
+    net_income_row = current_row
+    label_cell = worksheet.cell(row=net_income_row, column=2)
+    label_cell.value = "Net Income"
+    for period in periods:
+        date_str = period.get("date", "")
+        if date_str:
+            net_income = get_field_value(period, "net_income")
+            write_value(net_income_row, net_income, date_str)
+    current_row += 1
+    
+    # 11. Net Income Margin % (calculated value)
+    net_margin_row = current_row
+    label_cell = worksheet.cell(row=net_margin_row, column=2)
+    label_cell.value = "Net Income Margin %"
+    for period in periods:
+        date_str = period.get("date", "")
+        if date_str:
+            revenue = get_field_value(period, "revenue")
+            net_income = get_field_value(period, "net_income")
+            write_margin_value(net_margin_row, net_income, revenue, date_str)
+    current_row += 1
+    
+    last_row = current_row - 1
+    logger.info(f"Populated Income Statement values starting at row {start_row}, ending at row {last_row}")
+    return last_row
+
+
 def populate_cover_sheet(
     workbook,
     company_name: str,
@@ -612,7 +1708,7 @@ def populate_cover_sheet(
     - Company name to B2
     - Ticker to C3
     - Current stock price to C4
-    - As-of date for pricing data to D3
+    - As-of date for pricing data to D4
     
     Args:
         workbook: openpyxl Workbook object
@@ -658,19 +1754,19 @@ def populate_cover_sheet(
         # Write ticker to C3 (row 3, column 3)
         summary_sheet.cell(row=3, column=3).value = ticker
         
-        # Get current stock price (fake or real)
-        current_price, as_of_date = _get_current_stock_price(ticker, use_fake_data=use_fake_pricing)
+        # Hardcode price for testing - write directly to C4
+        test_price = 150.00
+        summary_sheet.cell(row=4, column=3).value = test_price
+        logger.info(f"Wrote hardcoded price ${test_price:.2f} to Summary sheet C4 (row 4, column 3)")
         
-        if current_price is not None:
-            # Write current stock price to C4 (row 4, column 3)
-            summary_sheet.cell(row=4, column=3).value = current_price
-            
-            # Write as-of date to D3 (row 3, column 4)
-            summary_sheet.cell(row=3, column=4).value = as_of_date
-            
-            logger.info(f"Populated Summary sheet: Company={company_name}, Ticker={ticker}, Price=${current_price:.2f}, As-of={as_of_date}")
-        else:
-            logger.warning(f"Populated Summary sheet: Company={company_name}, Ticker={ticker}, but could not get stock price")
+        # Write as-of date directly to the right (D4 - row 4, column 4)
+        if date is None:
+            date = datetime.now().strftime("%m/%d/%Y")
+        as_of_text = f"As of {date}"
+        summary_sheet.cell(row=4, column=4).value = as_of_text
+        logger.info(f"Wrote as-of date '{as_of_text}' to Summary sheet D4 (row 4, column 4)")
+        
+        logger.info(f"Populated Summary sheet: Company={company_name}, Ticker={ticker}, Price=${test_price:.2f}, As-of={as_of_text}")
     else:
         logger.warning("Summary sheet not found, skipping Summary sheet population")
 
@@ -678,7 +1774,8 @@ def populate_cover_sheet(
 def populate_three_statement_assumptions(
     worksheet,
     assumptions: Dict[str, Any],
-    forecast_periods: int = 5
+    forecast_periods: int = 5,
+    income_statement_end_row: Optional[int] = None
 ) -> None:
     """
     Populate 3-statement model assumptions in Excel worksheet.
@@ -700,34 +1797,42 @@ def populate_three_statement_assumptions(
                 "cash_flow": {...}
             }
         forecast_periods: Number of forecast periods (default 5)
+        income_statement_end_row: Optional row number where Income Statement ends (for finding Assets row)
     """
-    # Find assumption section headers dynamically
-    # Search for headers in column L (12) containing "Assumptions"
+    # Find Income Statement assumptions header (search for "IS Assumptions" or "Income Statement Assumptions")
     is_assumptions_row = None
-    bs_assumptions_row = None
-    cf_assumptions_row = None
-    
     for row in range(1, 200):
         cell_value = worksheet.cell(row=row, column=12).value  # Column L
         if cell_value:
             cell_str = str(cell_value).lower().strip()
-            if "is assumptions" in cell_str or (is_assumptions_row is None and "assumptions" in cell_str and "income" in cell_str):
+            if "is assumptions" in cell_str or ("assumptions" in cell_str and "income" in cell_str):
                 is_assumptions_row = row
-            elif "bs assumptions" in cell_str or (bs_assumptions_row is None and "assumptions" in cell_str and "balance" in cell_str):
-                bs_assumptions_row = row
-            elif "cf assumptions" in cell_str or (cf_assumptions_row is None and "assumptions" in cell_str and "cash" in cell_str):
-                cf_assumptions_row = row
+                break
     
-    # Fallback to hardcoded rows if headers not found
+    # Find Balance Sheet anchor: "Assets" row (start search after Income Statement if provided)
+    bs_anchor_row = None
+    if income_statement_end_row:
+        bs_anchor_row = find_statement_section_start(worksheet, "Assets", start_row=income_statement_end_row + 1)
+    else:
+        bs_anchor_row = find_statement_section_start(worksheet, "Assets")
+    
+    # Find Cash Flow anchor: "Cash Flows from Operating Activities" row
+    cf_anchor_row = find_statement_section_start(worksheet, "Cash Flows from Operating Activities")
+    
+    # Fallback to hardcoded rows if anchors not found
     if is_assumptions_row is None:
         is_assumptions_row = 4
         logger.warning("Could not find IS Assumptions header, using row 4")
-    if bs_assumptions_row is None:
-        bs_assumptions_row = 21
-        logger.warning("Could not find BS Assumptions header, using row 21")
-    if cf_assumptions_row is None:
-        cf_assumptions_row = 51
-        logger.warning("Could not find CF Assumptions header, using row 51")
+    if bs_anchor_row is None:
+        bs_anchor_row = 21
+        logger.warning("Could not find Assets row for Balance Sheet assumptions, using row 21")
+    else:
+        logger.info(f"Found Assets row at {bs_anchor_row} for Balance Sheet assumptions")
+    if cf_anchor_row is None:
+        cf_anchor_row = 51
+        logger.warning("Could not find Cash Flows from Operating Activities row for Cash Flow assumptions, using row 51")
+    else:
+        logger.info(f"Found Cash Flows from Operating Activities row at {cf_anchor_row} for Cash Flow assumptions")
     
     # Mapping of assumption names to their row offsets from section headers
     # Column N = 14 (Type), Column O = 15 (Value start), P=16, Q=17, R=18, S=19
@@ -762,13 +1867,15 @@ def populate_three_statement_assumptions(
             logger.warning(f"Unknown statement type: {statement_type}")
             continue
         
-        # Get the section header row for this statement type
+        # Get the anchor row for this statement type
         if statement_type == "income_statement":
             section_header_row = is_assumptions_row
         elif statement_type == "balance_sheet":
-            section_header_row = bs_assumptions_row
+            # Balance Sheet assumptions are anchored to "Assets" row
+            section_header_row = bs_anchor_row
         elif statement_type == "cash_flow":
-            section_header_row = cf_assumptions_row
+            # Cash Flow assumptions are anchored to "Cash Flows from Operating Activities" row
+            section_header_row = cf_anchor_row
         else:
             logger.warning(f"Unknown statement type: {statement_type}")
             continue
@@ -1201,9 +2308,15 @@ def replace_line_item_placeholders(
         model_role = (item.get("model_role") or "").strip()
         label = item.get("label", "").strip()
         
-        # Overwrite placeholder text with actual label
+        # Overwrite placeholder text with actual label (only if cell contains "Line Item")
         label_cell = worksheet.cell(row=row, column=2)
-        label_cell.value = label
+        cell_value = str(label_cell.value or "").strip()
+        if "line item" in cell_value.lower() and label:
+            label_cell.value = label
+            logger.debug(f"Replaced 'Line Item' with '{label}' at row {row}")
+        elif not label_cell.value and label:
+            # If cell is empty, write the label
+            label_cell.value = label
         
         # Write model_role to role column (ZZ) for later reference
         role_cell = worksheet.cell(row=row, column=column_index_from_string("ZZ"))
@@ -1244,9 +2357,10 @@ def replace_line_item_placeholders(
                 model_role = (item.get("model_role") or "").strip()
                 label = item.get("label", "").strip()
                 
-                # Write label to column B
+                # Write label to column B (new rows, so always write)
                 label_cell = worksheet.cell(row=row, column=2)
-                label_cell.value = label
+                if label:
+                    label_cell.value = label
                 
                 # Write model_role to role column (ZZ)
                 role_cell = worksheet.cell(row=row, column=column_index_from_string("ZZ"))
@@ -1765,7 +2879,11 @@ def populate_template_from_json(
     else:
         logger.warning(f"Missing company info (name={company_name}, ticker={ticker}), skipping cover sheet")
     
-    # Step 3.6: Load assumptions if provided
+    # Step 3.6: Populate DCF year headers for all DCF sheets
+    logger.info("Populating DCF year headers")
+    populate_dcf_year_headers(workbook, years_list, forecast_periods=5)
+    
+    # Step 3.7: Load assumptions if provided
     assumptions_data = None
     if assumptions_path:
         logger.info(f"Loading assumptions from {assumptions_path}")
@@ -1799,18 +2917,15 @@ def populate_template_from_json(
         year_column_map = map_years_to_columns(years_list, hist_columns)
         logger.info(f"Mapped years to columns: {year_column_map}")
         
-        # Write year headers to row 16 BEFORE any line item operations
-        # This ensures years are written to the header row and won't be overwritten
-        # Also search for and overwrite any "Year 'A'" headers in each statement section
-        write_year_headers(worksheet, year_column_map, header_row=16)
-        logger.info(f"Wrote year headers to row 16: {sorted(year_column_map.keys())}")
-        
-        # For 3-STMT A sheet, overwrite "Year 'A'" headers in each statement section header row
-        # Use the unified function for all three statements (Income Statement, Balance Sheet, Cash Flow Statement)
+        # For 3-STMT A sheet, populate year headers for all three statements
+        # This handles Income Statement (row 5), Balance Sheet (Assets row), and Cash Flow (Operating Activities row)
         if sheet_name == "3-STMT A":
-            overwrite_year_headers_in_statement_section(worksheet, "Income Statement", year_column_map)
-            overwrite_year_headers_in_statement_section(worksheet, "Balance Sheet", year_column_map)
-            overwrite_year_headers_in_statement_section(worksheet, "Cash Flow Statement", year_column_map)
+            logger.info("Populating 3-statement year headers")
+            populate_three_statement_year_headers(worksheet, years_list, forecast_periods=5)
+        else:
+            # For other sheets (e.g., DCF A), write year headers to row 16
+            write_year_headers(worksheet, year_column_map, header_row=16)
+            logger.info(f"Wrote year headers to row 16: {sorted(year_column_map.keys())}")
         
         # Populate historicals - use dedicated function for 3-STMT A sheet
         if sheet_name == "3-STMT A":
@@ -1941,6 +3056,10 @@ def export_full_model_to_excel(
     # Use fake pricing for dummy/test data
     use_fake_pricing = model_input.ticker.upper() in ["DUMMY", "TEST", "FAKE"]
     populate_cover_sheet(workbook, model_input.name, model_input.ticker, use_fake_pricing=use_fake_pricing)
+    
+    # Step 4.5: Populate DCF year headers for all DCF sheets
+    logger.info("Populating DCF year headers")
+    populate_dcf_year_headers(workbook, years_list, forecast_periods=5)
     
     # Step 5: Process DCF A and 3-STMT A sheets
     target_sheets = ["DCF A", "3-STMT A"]
@@ -2239,6 +3358,9 @@ def build_excel_workbook(company_id: int,
     Returns:
         bytes: Excel file content suitable for StreamingResponse
     """
+    if not XLSXWRITER_AVAILABLE:
+        raise ImportError("xlsxwriter is required for creating new Excel workbooks. Install with: pip install xlsxwriter")
+    
     # Create an in-memory workbook buffer
     output = BytesIO()
 
