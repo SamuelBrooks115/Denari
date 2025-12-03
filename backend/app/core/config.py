@@ -141,6 +141,21 @@ class Settings(BaseSettings):
         description="Maximum retry attempts for LLM API calls",
     )
 
+<<<<<<< HEAD
+    # Financial Modeling Prep API - For company profile data
+    FMP_API_KEY: str = Field(
+        "",
+        description="Financial Modeling Prep API key for company profile and image data",
+    )
+    
+    @field_validator('FMP_API_KEY', mode='before')
+    @classmethod
+    def strip_fmp_api_key(cls, v: Any) -> str:
+        """Strip whitespace from FMP API key."""
+        if isinstance(v, str):
+            return v.strip()
+        return v or ""
+=======
     # Database Configuration (Supabase)
     SUPABASE_DB_URL: str = Field(
         "",
@@ -160,6 +175,7 @@ class Settings(BaseSettings):
         "",
         description="Path or URL to S&P 500 ticker list (CSV or JSON)",
     )
+>>>>>>> 0251f9db5f18529bdb0bfc587a03702c55279b35
 
     model_config = SettingsConfigDict(
         env_file=_ENV_FILE_PATH,
