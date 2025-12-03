@@ -64,6 +64,7 @@ try:
     import xlsxwriter
     XLSXWRITER_AVAILABLE = True
 except ImportError:
+    XLSXWRITER_AVAILABLE = False
 
 logger = get_logger(__name__)
 
