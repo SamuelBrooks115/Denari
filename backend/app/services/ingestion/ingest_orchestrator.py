@@ -28,7 +28,7 @@ class IngestOrchestrator:
 
     def __init__(self, db: Session) -> None:
         self._db = db
-        repository = XbrlRepository(db_session=db)
+        repository = XbrlRepository()  # Uses default db_client from get_db_client()
         self._pipeline = SP500IngestionPipeline(repository=repository)
 
     # ------------------------------------------------------------------ #

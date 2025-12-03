@@ -36,7 +36,6 @@ class XbrlRepository:
         raw_payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         fiscal_year = datetime.fromisoformat(report_date).year
-        period_type = "instant" if filing_type == "BS" else "duration"
 
         inserted_statements: Dict[str, uuid.UUID] = {}
         inserted_facts = 0
@@ -58,6 +57,9 @@ class XbrlRepository:
                 fact for fact in normalized_facts if fact["statement_type"] == statement_type and fact["period_end"] == report_date
             ]
             if statements_facts:
+                # Determine period_type based on statement_type, not filing_type
+                # Balance Sheets are "instant" (point in time), IS and CF are "duration" (period)
+                period_type = "instant" if statement_type == "BS" else "duration"
                 self._db.insert_financial_facts(stmt_id, statements_facts, period_type=period_type)
                 inserted_facts += len(statements_facts)
             inserted_statements[statement_type] = stmt_id
