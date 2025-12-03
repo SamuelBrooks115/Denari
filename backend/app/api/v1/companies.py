@@ -8,7 +8,7 @@ Purpose:
 
 Key Interactions:
 - app.services.ingestion.ingest_orchestrator → runs the full data readiness pipeline.
-- app.services.ingestion.prices_adapter → fetches EOD prices from FMP/Yahoo.
+- app.services.ingestion.prices_adapter → fetches EOD prices from Yahoo Finance.
 - app.services.ingestion.edgar_adapter → fetches filings when historicals are missing.
 - app.models.company → ORM model representing company records.
 - app.core.database → DB session.
@@ -30,6 +30,10 @@ from typing import Optional, List
 from app.core.database import get_db
 from app.models.company import Company  # ORM model
 from app.services.ingestion.ingest_orchestrator import prepare_company_data  # Orchestration entrypoint
+from app.services.market_data.yfinance_market_data import (
+    get_company_price_and_shares,
+    get_ford_price_and_shares,
+)
 
 router = APIRouter(
     prefix="/companies",
@@ -114,3 +118,66 @@ async def prepare_company(company_id: int, db=Depends(get_db)):
     # TODO: call orchestrator
     result = {"status": "placeholder"}
     return result
+
+
+@router.get("/market-data/ford")
+async def read_ford_market_data():
+    """
+    GET /companies/market-data/ford
+    
+    Return latest price and shares outstanding for Ford (F),
+    using the Denari DB if possible to determine the ticker.
+    
+    Returns:
+        Dictionary with:
+        - ticker: Ticker symbol used
+        - last_price: Latest closing price
+        - shares_outstanding: Shares outstanding
+        - market_cap: Market capitalization (if both price and shares available)
+    """
+    data = get_ford_price_and_shares()
+    return data
+
+
+@router.get("/market-data/{ticker}")
+async def read_market_data_by_ticker(ticker: str):
+    """
+    GET /companies/market-data/{ticker}
+    
+    Return latest price and shares outstanding for a given ticker.
+    
+    Args:
+        ticker: Stock ticker symbol (e.g., "F", "AAPL")
+        
+    Returns:
+        Dictionary with:
+        - ticker: Ticker symbol used
+        - last_price: Latest closing price
+        - shares_outstanding: Shares outstanding
+        - market_cap: Market capitalization (if both price and shares available)
+    """
+    from app.services.market_data.yfinance_market_data import fetch_price_and_shares_from_yfinance
+    data = fetch_price_and_shares_from_yfinance(ticker)
+    return data
+
+
+@router.get("/market-data/by-name/{company_name}")
+async def read_market_data_by_name(company_name: str, db=Depends(get_db)):
+    """
+    GET /companies/market-data/by-name/{company_name}
+    
+    Return latest price and shares outstanding for a company by name.
+    Looks up the ticker from the Denari database first.
+    
+    Args:
+        company_name: Company name (e.g., "Ford Motor Company")
+        
+    Returns:
+        Dictionary with:
+        - ticker: Ticker symbol used (or None if not found)
+        - last_price: Latest closing price
+        - shares_outstanding: Shares outstanding
+        - market_cap: Market capitalization (if both price and shares available)
+    """
+    data = get_company_price_and_shares(company_name=company_name, session=db)
+    return data

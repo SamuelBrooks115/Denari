@@ -28,17 +28,32 @@ from app.core.config import settings
 # -----------------------------------------------------------------------------
 
 # Create database engine using SUPABASE_DB_URL from environment
-engine = create_engine(
-    settings.SUPABASE_DB_URL,
-    pool_pre_ping=True  # Ensures connections are valid before use
-)
+# Use psycopg (v3) driver - SQLAlchemy 2.0+ supports psycopg3
+# Convert postgresql:// to postgresql+psycopg:// if not already specified
+# Only create engine if SUPABASE_DB_URL is provided (allows endpoints that don't need DB to work)
+db_url = settings.SUPABASE_DB_URL
 
-# Session factory
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine
-)
+if not db_url or not db_url.strip():
+    # Database not configured - set engine and SessionLocal to None
+    # Endpoints that need DB will raise an error when get_db() is called
+    engine = None
+    SessionLocal = None
+else:
+    # Normalize the database URL
+    if db_url.startswith("postgresql://") and "+" not in db_url.split("://")[0]:
+        db_url = db_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    engine = create_engine(
+        db_url,
+        pool_pre_ping=True  # Ensures connections are valid before use
+    )
+
+    # Session factory
+    SessionLocal = sessionmaker(
+        autocommit=False,
+        autoflush=False,
+        bind=engine
+    )
 
 # -----------------------------------------------------------------------------
 # FastAPI Dependency
@@ -54,7 +69,17 @@ def get_db() -> Session:
 
     Responsibility:
     - Open session → yield to request handler → close session on completion.
+    
+    Raises:
+        RuntimeError: If database is not configured (SUPABASE_DB_URL is empty)
     """
+    if SessionLocal is None:
+        raise RuntimeError(
+            "Database is not configured. Please set SUPABASE_DB_URL environment variable. "
+            "Some endpoints (like screener) work without a database, but endpoints that require "
+            "database access will fail until SUPABASE_DB_URL is set."
+        )
+    
     db = SessionLocal()
     try:
         yield db

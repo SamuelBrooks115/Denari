@@ -1,0 +1,12 @@
+[
+  {
+    "symbol": "F",
+    "date": "2024-12-31",
+    "stockPrice": 9.9,
+    "numberOfShares": 3978000000,
+    "marketCapitalization": 39382200000,
+    "minusCashAndCashEquivalents": 22935000000,
+    "addTotalDebt": 160862000000,
+    "enterpriseValue": 177309200000
+  }
+]

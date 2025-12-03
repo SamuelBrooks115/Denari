@@ -20,7 +20,7 @@ Key Interactions:
 This module does NOT:
 - Trigger ingestion (handled by /companies/{id}/prepare).
 - Perform modeling (handled in app/services/modeling/*).
-- Perform normalization (handled in app/services/ingestion/normalize_xbrl.py).
+- Perform normalization (handled in app/services/ingestion/xbrl/normalizer.py).
 """
 
 from fastapi import APIRouter, Depends, HTTPException

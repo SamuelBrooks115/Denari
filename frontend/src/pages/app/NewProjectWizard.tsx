@@ -10,6 +10,9 @@ import { X } from "lucide-react";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Progress } from "@/components/ui/progress";
+import { Search, ArrowRight, ArrowLeft, CheckCircle, Loader2 } from "lucide-react";
+
 import { useNavigate } from "react-router-dom";
 
 // Mock company data for autocomplete
@@ -24,12 +27,17 @@ const mockCompanies = [
   { name: "JPMorgan Chase & Co.", ticker: "JPM" },
 ];
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
 export default function NewProjectWizard() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCompany, setSelectedCompany] = useState<{ name: string; ticker: string } | null>(null);
   const [open, setOpen] = useState(false);
   
+  const [currentStep, setCurrentStep] = useState<WizardStep>("search");
+  const [isSearching, setIsSearching] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [wizardData, setWizardData] = useState({
     companyName: "",
     ticker: "",
@@ -981,6 +989,7 @@ export default function NewProjectWizard() {
                         value={wizardData.dividendPercentNI}
                         onChange={(e) => setWizardData({ ...wizardData, dividendPercentNI: e.target.value })}
                       />
+                      <p className="text-xs text-muted-foreground">Recommended: 3-5 years</p>
                     </div>
 
                     <div className="space-y-2">
@@ -992,6 +1001,7 @@ export default function NewProjectWizard() {
                         value={wizardData.deferredTaxPercent}
                         onChange={(e) => setWizardData({ ...wizardData, deferredTaxPercent: e.target.value })}
                       />
+                      <p className="text-xs text-muted-foreground">Recommended: 5 years</p>
                     </div>
                   </div>
                 </div>
@@ -2095,3 +2105,4 @@ export default function NewProjectWizard() {
     </div>
   );
 }
+

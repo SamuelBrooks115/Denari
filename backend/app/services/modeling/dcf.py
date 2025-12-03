@@ -8,62 +8,910 @@ Purpose:
 - Add Terminal Value (TV)
 - Return enterprise value (EV), and optionally equity value/share price
 
-Inputs:
-- company_id
-- model_version (optional)
-- DB session (to load snapshot or working assumptions)
-- Must call run_three_statement() first to obtain projected FCFs
-
-Outputs (JSON-serializable):
-{
-  "fcf": [...],           # projected free cash flows
-  "discount_factors": [...],
-  "pv_fcf": [...],
-  "terminal_value": float,
-  "enterprise_value": float,
-  "equity_value": float | None,
-  "implied_share_price": float | None
-}
-
-This module does NOT:
-- Pull historicals directly
-- Produce Excel output
+This module is unit-testable without Excel and uses structured dataclass outputs.
 """
 
-from sqlalchemy.orm import Session
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
+<<<<<<< HEAD
+=======
 
-from app.services.modeling.three_statement import run_three_statement
-from app.models.valuation_model import ValuationModel
-from app.models.model_snapshot import ModelSnapshot
+from app.services.modeling.types import (
+    ThreeStatementOutput,
+    DcfOutput,
+    DcfYearResult,
+    Year,
+)
+>>>>>>> 0251f9db5f18529bdb0bfc587a03702c55279b35
 
 
-def run_dcf(company_id: int,
-            model_version: str | None,
-            db: Session) -> Dict[str, Any]:
+def run_dcf(
+    projections: ThreeStatementOutput,
+    assumptions: Dict[str, Any],
+) -> DcfOutput:
     """
-    Main entrypoint for DCF valuation.
+    Main entrypoint for DCF valuation (MVP - no database).
 
-    High-Level Steps:
-    1. Call run_three_statement() → get projected free cash flows.
-    2. Load WACC + terminal value inputs:
-        - If model_version provided → from ModelSnapshot
-        - Else → from ValuationModel (current working assumptions)
-    3. Apply discount factors:
-           PV_FCF[t] = FCF[t] / (1 + WACC)^(t+1)
-    4. Compute Terminal Value:
-           TV = FCF[last] * (1 + g) / (WACC - g)
-       or optionally:
-           TV = EBIT * Exit Multiple (future extension)
-    5. Enterprise Value = sum(PV_FCF) + PV(TV)
-    6. If desired → compute equity value:
-           EV - Debt + Cash
-    7. Optionally compute implied share price:
-           EquityValue / SharesOutstanding
+    Args:
+        projections: ThreeStatementOutput from run_three_statement()
+        assumptions: Dict with keys:
+            - wacc: float (weighted average cost of capital, e.g., 0.10 for 10%)
+            - terminal_growth_rate: float (perpetual growth rate, e.g., 0.025 for 2.5%)
+            - shares_outstanding: float | None (for share price calculation)
+            - debt: float | None (for equity value calculation)
+            - cash: float | None (for equity value calculation)
 
-    TODO:
-    - Implement discounting math after projection model is in place.
-    - Add support for exit multiple terminal value alternative.
-    - Add optional equity bridge (Cash & Debt from Balance Sheet if available).
+    Returns:
+        DcfOutput with yearly results and valuation metrics
     """
-    raise NotImplementedError("run_dcf() requires projected free cash flow inputs and WACC/terminal assumptions.")
+    fcf_list = projections.free_cash_flow
+    periods = projections.periods
+    
+    if not fcf_list:
+        raise ValueError("No free cash flow projections provided")
+
+    # Extract assumptions with defaults
+    wacc = assumptions.get("wacc", 0.10)  # 10% default
+    terminal_growth = assumptions.get("terminal_growth_rate", 0.025)  # 2.5% default
+    shares_outstanding = assumptions.get("shares_outstanding")
+    debt = assumptions.get("debt", 0.0)
+    cash = assumptions.get("cash", 0.0)
+
+    # Validate WACC and terminal growth
+    if wacc <= 0:
+        raise ValueError("WACC must be positive")
+    if terminal_growth >= wacc:
+        raise ValueError("Terminal growth rate must be less than WACC")
+
+    # Step 1: Calculate present value of each projected FCF
+    yearly_results: List[DcfYearResult] = []
+    
+    for i, fcf in enumerate(fcf_list):
+        # Extract year from period string (YYYY-MM-DD format)
+        period_str = periods[i] if i < len(periods) else f"Year{i+1}"
+        try:
+            year = int(period_str.split("-")[0])
+        except (ValueError, IndexError):
+            # Fallback: use sequential year numbering
+            year = 2024 + i + 1
+        
+        # Discount factor: 1 / (1 + WACC)^(period_number)
+        # Period 1 is discounted by 1 year, period 2 by 2 years, etc.
+        discount_factor = 1.0 / ((1 + wacc) ** (i + 1))
+        
+        pv_ufcf = fcf * discount_factor
+        
+        yearly_results.append(DcfYearResult(
+            year=year,
+            ufcf=fcf,
+            discount_factor=discount_factor,
+            pv_ufcf=pv_ufcf
+        ))
+
+    # Step 2: Calculate Terminal Value
+    # Using Gordon Growth Model: TV = FCF[last] * (1 + g) / (WACC - g)
+    last_fcf = fcf_list[-1]
+    terminal_value = last_fcf * (1 + terminal_growth) / (wacc - terminal_growth)
+
+    # Step 3: Discount Terminal Value to present
+    # TV is at end of projection period, so discount by number of periods
+    num_periods = len(fcf_list)
+    pv_terminal_value = terminal_value / ((1 + wacc) ** num_periods)
+
+    # Step 4: Calculate Enterprise Value
+    # EV = Sum of PV(UFCF) + PV(Terminal Value)
+    pv_fcf_sum = sum(result.pv_ufcf for result in yearly_results)
+    enterprise_value = pv_fcf_sum + pv_terminal_value
+
+    # Step 5: Calculate Equity Value (if balance sheet data available)
+    equity_value: Optional[float] = None
+    implied_share_price: Optional[float] = None
+    
+    if shares_outstanding is not None:
+        # Equity Value = Enterprise Value - Debt + Cash
+        equity_value = enterprise_value - debt + cash
+        
+        # Implied share price
+        if shares_outstanding > 0:
+            implied_share_price = equity_value / shares_outstanding
+
+<<<<<<< HEAD
+    return {
+        "fcf": fcf_list,
+        "discount_factors": discount_factors,
+        "pv_fcf": pv_fcf,
+        "terminal_value": terminal_value,
+        "pv_terminal_value": pv_terminal_value,
+        "enterprise_value": enterprise_value,
+        "equity_value": equity_value,
+        "implied_share_price": implied_share_price,
+        "wacc": wacc,
+        "terminal_growth_rate": terminal_growth,
+    }
+
+
+# Formula template dictionaries for DCF Excel output
+# Base case formulas reference the 3-statement Excel tab
+# Bear/Bull formulas use direct cell references within the same sheet
+
+# DCF Base formulas (references "3 Statement" sheet)
+DCF_BASE_FORMULAS: Dict[str, str] = {
+    "E8": "=E7+(E5*E6)",
+    "E9": "=J10/SUM(J10:J11)",
+    "E11": "=E10*(1-E13)",
+    "E12": "=1-E9",
+    
+    # Revenue row
+    "D17": "='3 Statement'!D5",
+    "E17": "='3 Statement'!E5",
+    "F17": "='3 Statement'!F5",
+    "G17": "='3 Statement'!G5",
+    "H17": "='3 Statement'!H5",
+    "I17": "='3 Statement'!I5",
+    "J17": "='3 Statement'!J5",
+    "K17": "='3 Statement'!K5",
+    
+    # Revenue growth
+    "E18": "=E17/D17-1",
+    "F18": "=F17/E17-1",
+    "G18": "=(1+'3 Statement'!O5)",
+    "H18": "=(1+'3 Statement'!P5)",
+    "I18": "=(1+'3 Statement'!Q5)",
+    "J18": "=(1+'3 Statement'!R5)",
+    "K18": "=(1+'3 Statement'!S5)",
+    
+    # COGS row
+    "D19": "='3 Statement'!D6",
+    "E19": "='3 Statement'!E6",
+    "F19": "='3 Statement'!F6",
+    "G19": "='3 Statement'!G6",
+    "H19": "='3 Statement'!H6",
+    "I19": "='3 Statement'!I6",
+    "J19": "='3 Statement'!J6",
+    "K19": "='3 Statement'!K6",
+    
+    # Gross profit
+    "D20": "=D17-D19",
+    "E20": "=E17-E19",
+    "F20": "=F17-F19",
+    "G20": "=G17-G19",
+    "H20": "=H17-H19",
+    "I20": "=I17-I19",
+    "J20": "=J17-J19",
+    "K20": "=K17-K19",
+    
+    # Gross profit growth
+    "E21": "=E20/D20-1",
+    "F21": "=F20/E20-1",
+    "G21": "='3 Statement'!G8",
+    "H21": "='3 Statement'!H8",
+    "I21": "='3 Statement'!I8",
+    "J21": "='3 Statement'!J8",
+    "K21": "='3 Statement'!K8",
+    
+    # Operating expenses
+    "D23": "=SUM('3 Statement'!D9:D11)",
+    "E23": "=SUM('3 Statement'!E9:E11)",
+    "F23": "=SUM('3 Statement'!F9:F11)",
+    "G23": "=SUM('3 Statement'!G9:G11)",
+    "H23": "=SUM('3 Statement'!H9:H11)",
+    "I23": "=SUM('3 Statement'!I9:I11)",
+    "J23": "=SUM('3 Statement'!J9:J11)",
+    "K23": "=SUM('3 Statement'!K9:K11)",
+    
+    # Operating income
+    "D24": "=D20+D23",
+    "E24": "=E20+E23",
+    "F24": "=F20+F23",
+    "G24": "='3 Statement'!G12",
+    "H24": "='3 Statement'!H12",
+    "I24": "='3 Statement'!I12",
+    "J24": "='3 Statement'!J12",
+    "K24": "='3 Statement'!K12",
+    
+    # Operating margin
+    "D25": "=D24/D17",
+    "E25": "=E24/E17",
+    "F25": "=F24/F17",
+    "G25": "='3 Statement'!G13",
+    "H25": "='3 Statement'!H13",
+    "I25": "='3 Statement'!I13",
+    "J25": "='3 Statement'!J13",
+    "K25": "='3 Statement'!K13",
+    
+    # After-tax operating income
+    "D27": "=D24*(1-$E$13)",
+    "E27": "=E24*(1-$E$13)",
+    "F27": "=F24*(1-$E$13)",
+    "G27": "=G24*(1-$E$13)",
+    "H27": "=H24*(1-$E$13)",
+    "I27": "=I24*(1-$E$13)",
+    "J27": "=J24*(1-$E$13)",
+    "K27": "=K24*(1-$E$13)",
+    
+    # Depreciation
+    "D28": "='3 Statement'!D73",
+    "E28": "='3 Statement'!E73",
+    "F28": "='3 Statement'!F73",
+    "G28": "='3 Statement'!G73",
+    "H28": "='3 Statement'!H73",
+    "I28": "='3 Statement'!I73",
+    "J28": "='3 Statement'!J73",
+    "K28": "='3 Statement'!K73",
+    
+    # CapEx
+    "D29": "='3 Statement'!D84",
+    "E29": "='3 Statement'!E84",
+    "F29": "='3 Statement'!F84",
+    "G29": "='3 Statement'!G84",
+    "H29": "='3 Statement'!H84",
+    "I29": "='3 Statement'!I84",
+    "J29": "='3 Statement'!J84",
+    "K29": "='3 Statement'!K84",
+    
+    # Working capital change
+    "D30": "='3 Statement'!D76",
+    "E30": "='3 Statement'!E76",
+    "F30": "='3 Statement'!F76",
+    "G30": "='3 Statement'!G76",
+    "H30": "='3 Statement'!H76",
+    "I30": "='3 Statement'!I76",
+    "J30": "='3 Statement'!J76",
+    "K30": "='3 Statement'!K76",
+    
+    # Free cash flow
+    "D31": "=D27+D28+D29+D30",
+    "E31": "=E27+E28+E29+E30",
+    "F31": "=F27+F28+F29+F30",
+    "G31": "=G27+G28+G29+G30",
+    "H31": "=H27+H28+H29+H30",
+    "I31": "=I27+I28+I29+I30",
+    "J31": "=J27+J28+J29+J30",
+    "K31": "=K27+K28+K29+K30",
+    
+    # Discount periods
+    "G34": "=YEARFRAC(TODAY(),$J$5)",
+    "H34": "=G34+1",
+    "I34": "=H34+1",
+    "J34": "=I34+1",
+    "K34": "=J34+1",
+    
+    # Discount factors
+    "G35": "=(1/(1+$E$14))^G34",
+    "H35": "=(1/(1+$E$14))^H34",
+    "I35": "=(1/(1+$E$14))^I34",
+    "J35": "=(1/(1+$E$14))^J34",
+    "K35": "=(1/(1+$E$14))^K34",
+    
+    # PV of FCF
+    "G37": "=G31*G35",
+    "H37": "=H31*H35",
+    "I37": "=I31*I35",
+    "J37": "=J31*J35",
+    "K37": "=K31*K35",
+    
+    # Sum of PV FCF
+    "K38": "=SUM(G37:K37)",
+    
+    # Terminal value
+    "K40": "=(K31*(1+J6))/(E14-J6)",
+    "K41": "=K40*K35",
+    
+    # Enterprise value
+    "K43": "=K41+K38",
+    
+    # Equity value calculations
+    "K44": "=J11-J7",
+    "K45": "=K41-K44",
+    "K47": "=J8",
+    "K48": "=K45/K47",
+    "K49": "=(K48/J9-1)*100",
+    
+    # Sensitivity table references
+    "E53": "=K48",
+    "F53": "=G53-C53",
+    "G53": "=H53-C53",
+    "H53": "=J6",
+    "I53": "=H53+C53",
+    "J53": "=I53+C53",
+    "E54": "=E55-C52",
+}
+
+# DCF Bear formulas (references "3 Statement" sheet for historical, direct calculations for projections)
+DCF_BEAR_FORMULAS: Dict[str, str] = {
+    "E8": "=E7+(E5*E6)",
+    "E9": "=J10/SUM(J10:J11)",
+    "J10": "=J8*J9",
+    "E11": "=E10*(1-E13)",
+    "E12": "=1-E9",
+    
+    # Revenue row (historical from 3 Statement, projected calculated)
+    "D17": "='3 Statement'!D5",
+    "E17": "='3 Statement'!E5",
+    "F17": "='3 Statement'!F5",
+    "G17": "=F17*G18",
+    "H17": "=G17*H18",
+    "I17": "=H17*I18",
+    "J17": "=I17*J18",
+    "K17": "=J17*K18",
+    
+    # Revenue growth
+    "E18": "=E17/D17-1",
+    "F18": "=F17/E17-1",
+    "G18": "=(1+O17)",
+    "H18": "=(1+P17)",
+    "I18": "=(1+Q17)",
+    "J18": "=(1+R17)",
+    "K18": "=(1+S17)",
+    
+    # COGS row
+    "D19": "='3 Statement'!D6",
+    "E19": "='3 Statement'!E6",
+    "F19": "='3 Statement'!F6",
+    "G19": "=G17*G21",
+    "H19": "=H17*H21",
+    "I19": "=I17*I21",
+    "J19": "=J17*J21",
+    "K19": "=K17*K21",
+    
+    # Gross profit
+    "D20": "=D17-D19",
+    "E20": "=E17-E19",
+    "F20": "=F17-F19",
+    "G20": "=G17-G19",
+    "H20": "=H17-H19",
+    "I20": "=I17-I19",
+    "J20": "=J17-J19",
+    "K20": "=K17-K19",
+    
+    # Gross profit growth
+    "E21": "=E20/D20-1",
+    "F21": "=F20/E20-1",
+    
+    # Operating expenses
+    "D23": "=SUM('3 Statement'!D9:D11)",
+    "E23": "=SUM('3 Statement'!E9:E11)",
+    "F23": "=SUM('3 Statement'!F9:F11)",
+    "G23": "=G17*G25",
+    "H23": "=H17*H25",
+    "I23": "=I17*I25",
+    "J23": "=J17*J25",
+    "K23": "=K17*K25",
+    
+    # Operating income
+    "D24": "=D20+D23",
+    "E24": "=E20+E23",
+    "F24": "=F20+F23",
+    "G24": "=G21-G23",
+    "H24": "=H21-H23",
+    "I24": "=I21-I23",
+    "J24": "=J21-J23",
+    "K24": "=K21-K23",
+    
+    # Operating margin
+    "D25": "=D24/D17",
+    "E25": "=E24/E17",
+    "F25": "=F24/F17",
+    
+    # After-tax operating income
+    "D27": "=D24*(1-$E$13)",
+    "E27": "=E24*(1-$E$13)",
+    "F27": "=F24*(1-$E$13)",
+    "G27": "=G24*(1-$E$13)",
+    "H27": "=H24*(1-$E$13)",
+    "I27": "=I24*(1-$E$13)",
+    "J27": "=J24*(1-$E$13)",
+    "K27": "=K24*(1-$E$13)",
+    
+    # Depreciation
+    "D28": "='3 Statement'!D73",
+    "E28": "='3 Statement'!E73",
+    "F28": "='3 Statement'!F73",
+    
+    # CapEx
+    "D29": "='3 Statement'!D84",
+    "E29": "='3 Statement'!E84",
+    "F29": "='3 Statement'!F84",
+    
+    # Working capital change
+    "D30": "='3 Statement'!D76",
+    "E30": "='3 Statement'!E76",
+    "F30": "='3 Statement'!F76",
+    
+    # Free cash flow
+    "D31": "=D27+D28+D29+D30",
+    "E31": "=E27+E28+E29+E30",
+    "F31": "=F27+F28+F29+F30",
+    "G31": "=G27+G28+G29+G30",
+    "H31": "=H27+H28+H29+H30",
+    "I31": "=I27+I28+I29+I30",
+    "J31": "=J27+J28+J29+J30",
+    "K31": "=K27+K28+K29+K30",
+    
+    # Discount periods
+    "G34": "=YEARFRAC(TODAY(),$J$5)",
+    "H34": "=G34+1",
+    "I34": "=H34+1",
+    "J34": "=I34+1",
+    "K34": "=J34+1",
+    
+    # Discount factors
+    "G35": "=(1/(1+$E$14))^G34",
+    "H35": "=(1/(1+$E$14))^H34",
+    "I35": "=(1/(1+$E$14))^I34",
+    "J35": "=(1/(1+$E$14))^J34",
+    "K35": "=(1/(1+$E$14))^K34",
+    
+    # PV of FCF
+    "G37": "=G31*G35",
+    "H37": "=H31*H35",
+    "I37": "=I31*I35",
+    "J37": "=J31*J35",
+    "K37": "=K31*K35",
+    
+    # Sum of PV FCF
+    "K38": "=SUM(G37:K37)",
+    
+    # Terminal value
+    "K40": "=(K31*(1+J6))/(E14-J6)",
+    "K41": "=K40*K35",
+    
+    # Enterprise value
+    "K43": "=K41+K38",
+    
+    # Equity value calculations
+    "K44": "=J11-J7",
+    "K45": "=K41-K44",
+    "K47": "=J8",
+    "K48": "=K45/K47",
+    "K49": "=(K48/J9-1)*100",
+    
+    # Sensitivity table references
+    "E53": "=K48",
+    "F53": "=G53-C53",
+    "G53": "=H53-C53",
+    "H53": "=J6",
+    "I53": "=H53+C53",
+    "J53": "=I53+C53",
+    "E54": "=E55-C52",
+}
+
+# DCF Bull formulas (references "3 Statement" sheet for historical, direct calculations for projections)
+DCF_BULL_FORMULAS: Dict[str, str] = {
+    "E8": "=E7+(E5*E6)",
+    "E9": "=J10/SUM(J10:J11)",
+    "J10": "=J8*J9",
+    "E11": "=E10*(1-E13)",
+    "E12": "=1-E9",
+    
+    # Revenue row (historical from 3 Statement, projected calculated)
+    "D17": "='3 Statement'!D5",
+    "E17": "='3 Statement'!E5",
+    "F17": "='3 Statement'!F5",
+    "G17": "=F17*G18",
+    "H17": "=G17*H18",
+    "I17": "=H17*I18",
+    "J17": "=I17*J18",
+    "K17": "=J17*K18",
+    
+    # Revenue growth
+    "E18": "=E17/D17-1",
+    "F18": "=F17/E17-1",
+    
+    # COGS row
+    "D19": "='3 Statement'!D6",
+    "E19": "='3 Statement'!E6",
+    "F19": "='3 Statement'!F6",
+    "G19": "=G17*G21",
+    "H19": "=H17*H21",
+    "I19": "=I17*I21",
+    "J19": "=J17*J21",
+    "K19": "=K17*K21",
+    
+    # Gross profit
+    "D20": "=D17-D19",
+    "E20": "=E17-E19",
+    "F20": "=F17-F19",
+    "G20": "=G17-G19",
+    "H20": "=H17-H19",
+    "I20": "=I17-I19",
+    "J20": "=J17-J19",
+    "K20": "=K17-K19",
+    
+    # Gross profit growth
+    "E21": "=E20/D20-1",
+    "F21": "=F20/E20-1",
+    
+    # Operating expenses
+    "D23": "=SUM('3 Statement'!D9:D11)",
+    "E23": "=SUM('3 Statement'!E9:E11)",
+    "F23": "=SUM('3 Statement'!F9:F11)",
+    "G23": "=G17*G25",
+    "H23": "=H17*H25",
+    "I23": "=I17*I25",
+    "J23": "=J17*J25",
+    "K23": "=K17*K25",
+    
+    # Operating income
+    "D24": "=D20+D23",
+    "E24": "=E20+E23",
+    "F24": "=F20+F23",
+    "G24": "=G21-G23",
+    "H24": "=H21-H23",
+    "I24": "=I21-I23",
+    "J24": "=J21-J23",
+    "K24": "=K21-K23",
+    
+    # Operating margin
+    "D25": "=D24/D17",
+    "E25": "=E24/E17",
+    "F25": "=F24/F17",
+    
+    # After-tax operating income
+    "D27": "=D24*(1-$E$13)",
+    "E27": "=E24*(1-$E$13)",
+    "F27": "=F24*(1-$E$13)",
+    "G27": "=G24*(1-$E$13)",
+    "H27": "=H24*(1-$E$13)",
+    "I27": "=I24*(1-$E$13)",
+    "J27": "=J24*(1-$E$13)",
+    "K27": "=K24*(1-$E$13)",
+    
+    # Depreciation
+    "D28": "='3 Statement'!D73",
+    "E28": "='3 Statement'!E73",
+    "F28": "='3 Statement'!F73",
+    
+    # CapEx
+    "D29": "='3 Statement'!D84",
+    "E29": "='3 Statement'!E84",
+    "F29": "='3 Statement'!F84",
+    
+    # Working capital change
+    "D30": "='3 Statement'!D76",
+    "E30": "='3 Statement'!E76",
+    "F30": "='3 Statement'!F76",
+    
+    # Free cash flow
+    "D31": "=D27+D28+D29+D30",
+    "E31": "=E27+E28+E29+E30",
+    "F31": "=F27+F28+F29+F30",
+    "G31": "=G27+G28+G29+G30",
+    "H31": "=H27+H28+H29+H30",
+    "I31": "=I27+I28+I29+I30",
+    "J31": "=J27+J28+J29+J30",
+    "K31": "=K27+K28+K29+K30",
+    
+    # Discount periods
+    "G34": "=YEARFRAC(TODAY(),$J$5)",
+    "H34": "=G34+1",
+    "I34": "=H34+1",
+    "J34": "=I34+1",
+    "K34": "=J34+1",
+    
+    # Discount factors
+    "G35": "=(1/(1+$E$14))^G34",
+    "H35": "=(1/(1+$E$14))^H34",
+    "I35": "=(1/(1+$E$14))^I34",
+    "J35": "=(1/(1+$E$14))^J34",
+    "K35": "=(1/(1+$E$14))^K34",
+    
+    # PV of FCF
+    "G37": "=G31*G35",
+    "H37": "=H31*H35",
+    "I37": "=I31*I35",
+    "J37": "=J31*J35",
+    "K37": "=K31*K35",
+    
+    # Sum of PV FCF
+    "K38": "=SUM(G37:K37)",
+    
+    # Terminal value
+    "K40": "=(K31*(1+J6))/(E14-J6)",
+    "K41": "=K40*K35",
+    
+    # Enterprise value
+    "K43": "=K41+K38",
+    
+    # Equity value calculations
+    "K44": "=J11-J7",
+    "K45": "=K41-K44",
+    "K47": "=J8",
+    "K48": "=K45/K47",
+    "K49": "=(K48/J9-1)*100",
+    
+    # Sensitivity table references
+    "E53": "=K48",
+    "F53": "=G53-C53",
+    "G53": "=H53-C53",
+    "H53": "=J6",
+    "I53": "=H53+C53",
+    "J53": "=I53+C53",
+    "E54": "=E55-C52",
+}
+
+
+def _col_to_letter(col_num: int) -> str:
+    """
+    Convert 0-indexed column number to Excel column letter(s).
+    
+    Args:
+        col_num: 0-indexed column number (0 = A, 1 = B, ..., 25 = Z, 26 = AA, etc.)
+    
+    Returns:
+        Excel column letter(s) (e.g., "A", "B", "Z", "AA", "AB")
+    """
+    result = ""
+    col_num += 1  # Convert to 1-indexed
+    while col_num > 0:
+        col_num -= 1
+        result = chr(65 + (col_num % 26)) + result
+        col_num //= 26
+    return result
+
+
+def write_dcf_sheet(
+    workbook,
+    dcf_data: Dict[str, Any],
+    scenario: str = "Base",
+    three_statement_sheet_name: str = "Three Statement Model",
+    sheet_name: Optional[str] = None,
+    start_row: int = 0,
+    start_col: int = 0,
+    custom_formulas: Optional[Dict[str, str]] = None,
+) -> None:
+    """
+    Write DCF valuation to Excel worksheet with formulas.
+    
+    Helper for excel_export.py to write the DCF valuation to Excel.
+    This function writes both calculated values and Excel formulas for
+    interactive modeling.
+    
+    Expected usage:
+        workbook = xlsxwriter.Workbook(...)
+        dcf_data = run_dcf(...)
+        # For Base case (references 3-statement sheet)
+        write_dcf_sheet(workbook, dcf_data, scenario="Base")
+        # For Bear/Bull cases (direct references)
+        write_dcf_sheet(workbook, dcf_data, scenario="Bear")
+        write_dcf_sheet(workbook, dcf_data, scenario="Bull")
+    
+    Args:
+        workbook: xlsxwriter Workbook object
+        dcf_data: Output from run_dcf() containing:
+            - fcf: List[float] - projected free cash flows
+            - discount_factors: List[float]
+            - pv_fcf: List[float] - present value of FCF
+            - terminal_value: float
+            - pv_terminal_value: float
+            - enterprise_value: float
+            - equity_value: float | None
+            - implied_share_price: float | None
+            - wacc: float
+            - terminal_growth_rate: float
+        scenario: Scenario name - "Base", "Bear", or "Bull" (default: "Base")
+                  Determines which formula dictionary to use
+        three_statement_sheet_name: Name of the 3-statement sheet (default: "Three Statement Model")
+                                   Used for Base case formulas that reference the 3-statement sheet
+        sheet_name: Optional custom sheet name (default: "DCF Base", "DCF Bear", or "DCF Bull")
+        start_row: Starting row for the table (0-indexed, default: 0)
+        start_col: Starting column for the table (0-indexed, default: 0)
+        custom_formulas: Optional dict mapping cell addresses to formula strings.
+                        If provided, these formulas will be used instead of default formulas.
+                        Example: {"B10": "='Three Statement Model'!G72", "C10": "=B10/(1+$E$14)^1"}
+    
+    The sheet contains:
+        - Header with scenario name
+        - WACC and Terminal Growth Rate inputs
+        - Free Cash Flow projections table
+        - Discount factors and PV calculations
+        - Terminal Value calculation
+        - Enterprise Value and Equity Value
+        - Implied Share Price
+        - Excel formulas for calculations (from DCF_BASE_FORMULAS or DCF_BEAR_BULL_FORMULAS)
+    """
+    import xlsxwriter
+    
+    # Determine sheet name
+    if sheet_name is None:
+        sheet_name = f"DCF {scenario}"
+    
+    worksheet = workbook.add_worksheet(sheet_name)
+    
+    # Determine which formula dictionary to use
+    if scenario.lower() == "base":
+        formula_dict = DCF_BASE_FORMULAS
+    elif scenario.lower() == "bear":
+        formula_dict = DCF_BEAR_FORMULAS
+    elif scenario.lower() == "bull":
+        formula_dict = DCF_BULL_FORMULAS
+    else:
+        # Default to Bear/Bull if unknown scenario
+        formula_dict = DCF_BEAR_FORMULAS
+    
+    # Create formats
+    header_format = workbook.add_format({
+        'bold': True,
+        'bg_color': '#D3D3D3',
+        'align': 'center',
+        'valign': 'vcenter',
+    })
+    
+    label_format = workbook.add_format({
+        'bold': True,
+        'align': 'left',
+    })
+    
+    number_format = workbook.add_format({
+        'num_format': '#,##0',
+    })
+    
+    currency_format = workbook.add_format({
+        'num_format': '$#,##0',
+    })
+    
+    percent_format = workbook.add_format({
+        'num_format': '0.00%',
+    })
+    
+    formula_format = workbook.add_format({
+        'num_format': '#,##0',
+        'italic': True,
+    })
+    
+    # Write header
+    worksheet.write(start_row, start_col, f"DCF Valuation - {scenario} Case", header_format)
+    current_row = start_row + 2
+    
+    # Write assumptions section
+    worksheet.write(current_row, start_col, "Assumptions", label_format)
+    current_row += 1
+    
+    worksheet.write(current_row, start_col, "WACC", label_format)
+    wacc_cell = f"{_col_to_letter(start_col + 1)}{current_row + 1}"
+    if custom_formulas and wacc_cell in custom_formulas:
+        worksheet.write(current_row, start_col + 1, custom_formulas[wacc_cell], percent_format)
+    elif wacc_cell in formula_dict:
+        # For Base case, formulas might reference 3-statement sheet
+        formula = formula_dict[wacc_cell]
+        if scenario.lower() == "base" and "'" not in formula and "!" not in formula:
+            # If it's a simple reference, it might need sheet prefix
+            pass  # Use as-is for now
+        worksheet.write(current_row, start_col + 1, formula, formula_format)
+    else:
+        worksheet.write(current_row, start_col + 1, dcf_data.get("wacc", 0.10), percent_format)
+    current_row += 1
+    
+    worksheet.write(current_row, start_col, "Terminal Growth Rate", label_format)
+    tg_cell = f"{_col_to_letter(start_col + 1)}{current_row + 1}"
+    if custom_formulas and tg_cell in custom_formulas:
+        worksheet.write(current_row, start_col + 1, custom_formulas[tg_cell], percent_format)
+    elif tg_cell in formula_dict:
+        formula = formula_dict[tg_cell]
+        worksheet.write(current_row, start_col + 1, formula, formula_format)
+    else:
+        worksheet.write(current_row, start_col + 1, dcf_data.get("terminal_growth_rate", 0.025), percent_format)
+    current_row += 2
+    
+    # Write FCF projections table
+    worksheet.write(current_row, start_col, "Period", header_format)
+    worksheet.write(current_row, start_col + 1, "Free Cash Flow", header_format)
+    worksheet.write(current_row, start_col + 2, "Discount Factor", header_format)
+    worksheet.write(current_row, start_col + 3, "PV of FCF", header_format)
+    current_row += 1
+    
+    fcf_list = dcf_data.get("fcf", [])
+    discount_factors = dcf_data.get("discount_factors", [])
+    pv_fcf_list = dcf_data.get("pv_fcf", [])
+    
+    for i, (fcf, df, pv) in enumerate(zip(fcf_list, discount_factors, pv_fcf_list)):
+        # Period number
+        worksheet.write(current_row, start_col, i + 1, number_format)
+        
+        # FCF
+        fcf_cell = f"{_col_to_letter(start_col + 1)}{current_row + 1}"
+        if custom_formulas and fcf_cell in custom_formulas:
+            worksheet.write(current_row, start_col + 1, custom_formulas[fcf_cell], formula_format)
+        elif fcf_cell in formula_dict:
+            formula = formula_dict[fcf_cell]
+            # For Base case, add 3-statement sheet reference if needed
+            if scenario.lower() == "base" and "'" not in formula and "!" not in formula:
+                # Check if it's a simple cell reference that should reference 3-statement sheet
+                if formula.startswith("=") and len(formula) > 1:
+                    # Assume it references a cell in 3-statement sheet
+                    formula = f"='{three_statement_sheet_name}'!{formula[1:]}"
+            worksheet.write(current_row, start_col + 1, formula, formula_format)
+        else:
+            worksheet.write(current_row, start_col + 1, fcf, currency_format)
+        
+        # Discount Factor
+        df_cell = f"{_col_to_letter(start_col + 2)}{current_row + 1}"
+        if custom_formulas and df_cell in custom_formulas:
+            worksheet.write(current_row, start_col + 2, custom_formulas[df_cell], formula_format)
+        elif df_cell in formula_dict:
+            worksheet.write(current_row, start_col + 2, formula_dict[df_cell], formula_format)
+        else:
+            worksheet.write(current_row, start_col + 2, df, number_format)
+        
+        # PV of FCF
+        pv_cell = f"{_col_to_letter(start_col + 3)}{current_row + 1}"
+        if custom_formulas and pv_cell in custom_formulas:
+            worksheet.write(current_row, start_col + 3, custom_formulas[pv_cell], formula_format)
+        elif pv_cell in formula_dict:
+            worksheet.write(current_row, start_col + 3, formula_dict[pv_cell], formula_format)
+        else:
+            worksheet.write(current_row, start_col + 3, pv, currency_format)
+        
+        current_row += 1
+    
+    current_row += 1
+    
+    # Write summary section
+    worksheet.write(current_row, start_col, "Terminal Value", label_format)
+    tv_cell = f"{_col_to_letter(start_col + 1)}{current_row + 1}"
+    if custom_formulas and tv_cell in custom_formulas:
+        worksheet.write(current_row, start_col + 1, custom_formulas[tv_cell], currency_format)
+    elif tv_cell in formula_dict:
+        worksheet.write(current_row, start_col + 1, formula_dict[tv_cell], formula_format)
+    else:
+        worksheet.write(current_row, start_col + 1, dcf_data.get("terminal_value", 0.0), currency_format)
+    current_row += 1
+    
+    worksheet.write(current_row, start_col, "PV of Terminal Value", label_format)
+    pv_tv_cell = f"{_col_to_letter(start_col + 1)}{current_row + 1}"
+    if custom_formulas and pv_tv_cell in custom_formulas:
+        worksheet.write(current_row, start_col + 1, custom_formulas[pv_tv_cell], currency_format)
+    elif pv_tv_cell in formula_dict:
+        worksheet.write(current_row, start_col + 1, formula_dict[pv_tv_cell], formula_format)
+    else:
+        worksheet.write(current_row, start_col + 1, dcf_data.get("pv_terminal_value", 0.0), currency_format)
+    current_row += 1
+    
+    worksheet.write(current_row, start_col, "Enterprise Value", label_format)
+    ev_cell = f"{_col_to_letter(start_col + 1)}{current_row + 1}"
+    if custom_formulas and ev_cell in custom_formulas:
+        worksheet.write(current_row, start_col + 1, custom_formulas[ev_cell], currency_format)
+    elif ev_cell in formula_dict:
+        worksheet.write(current_row, start_col + 1, formula_dict[ev_cell], formula_format)
+    else:
+        worksheet.write(current_row, start_col + 1, dcf_data.get("enterprise_value", 0.0), currency_format)
+    current_row += 1
+    
+    equity_value = dcf_data.get("equity_value")
+    if equity_value is not None:
+        worksheet.write(current_row, start_col, "Equity Value", label_format)
+        eqv_cell = f"{_col_to_letter(start_col + 1)}{current_row + 1}"
+        if custom_formulas and eqv_cell in custom_formulas:
+            worksheet.write(current_row, start_col + 1, custom_formulas[eqv_cell], currency_format)
+        elif eqv_cell in formula_dict:
+            worksheet.write(current_row, start_col + 1, formula_dict[eqv_cell], formula_format)
+        else:
+            worksheet.write(current_row, start_col + 1, equity_value, currency_format)
+        current_row += 1
+        
+        implied_price = dcf_data.get("implied_share_price")
+        if implied_price is not None:
+            worksheet.write(current_row, start_col, "Implied Share Price", label_format)
+            price_cell = f"{_col_to_letter(start_col + 1)}{current_row + 1}"
+            if custom_formulas and price_cell in custom_formulas:
+                worksheet.write(current_row, start_col + 1, custom_formulas[price_cell], currency_format)
+            elif price_cell in formula_dict:
+                worksheet.write(current_row, start_col + 1, formula_dict[price_cell], formula_format)
+            else:
+                worksheet.write(current_row, start_col + 1, implied_price, currency_format)
+    
+    # Set column widths for readability
+    worksheet.set_column(start_col, start_col, 25)  # Label column
+    for col_idx in range(1, 5):
+        worksheet.set_column(start_col + col_idx, start_col + col_idx, 18)  # Data columns
+=======
+    return DcfOutput(
+        yearly_results=yearly_results,
+        terminal_value=terminal_value,
+        pv_terminal_value=pv_terminal_value,
+        enterprise_value=enterprise_value,
+        equity_value=equity_value,
+        implied_share_price=implied_share_price,
+        wacc=wacc,
+        terminal_growth_rate=terminal_growth,
+    )
+>>>>>>> 0251f9db5f18529bdb0bfc587a03702c55279b35
