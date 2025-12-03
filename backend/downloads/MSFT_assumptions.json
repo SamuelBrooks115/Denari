@@ -1,0 +1,134 @@
+{
+  "competitors": [
+    "AAPL",
+    "GOOGL",
+    "AMZN",
+    "META"
+  ],
+  "assumptions": {
+    "revenue": {
+      "type": "step",
+      "values": [
+        0.05,
+        0.06,
+        0.07,
+        0.08,
+        0.09
+      ]
+    },
+    "gross_margin": {
+      "type": "constant",
+      "values": [
+        0.4,
+        0.4,
+        0.4,
+        0.4,
+        0.4
+      ]
+    },
+    "operating_margin": {
+      "type": "custom",
+      "values": [
+        0.15,
+        0.16,
+        0.17,
+        0.18,
+        0.19
+      ]
+    },
+    "ebitda_margin": {
+      "type": "step",
+      "values": [
+        0.2,
+        0.21,
+        0.22,
+        0.23,
+        0.24
+      ]
+    },
+    "tax_rate": {
+      "type": "constant",
+      "values": [
+        0.21,
+        0.21,
+        0.21,
+        0.21,
+        0.21
+      ]
+    },
+    "interest_rate_debt": {
+      "type": "constant",
+      "values": [
+        0.05,
+        0.05,
+        0.05,
+        0.05,
+        0.05
+      ]
+    }
+  },
+  "balance_sheet": {
+    "depreciation_ppe": {
+      "type": "constant",
+      "values": [
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1
+      ]
+    },
+    "inventory_sales": {
+      "type": "step",
+      "values": [
+        0.15,
+        0.16,
+        0.17,
+        0.18,
+        0.19
+      ]
+    },
+    "lt_debt_change": {
+      "type": "custom",
+      "values": [
+        0.05,
+        0.03,
+        0.02,
+        0.01,
+        0.0
+      ]
+    }
+  },
+  "cash_flow": {
+    "share_repurchases": {
+      "type": "step",
+      "values": [
+        1000000,
+        1200000,
+        1400000,
+        1600000,
+        1800000
+      ]
+    },
+    "dividends_ni": {
+      "type": "constant",
+      "values": [
+        0.3,
+        0.3,
+        0.3,
+        0.3,
+        0.3
+      ]
+    },
+    "capex": {
+      "type": "custom",
+      "values": [
+        5000000,
+        5500000,
+        6000000,
+        6500000,
+        7000000
+      ]
+    }
+  }
+}
