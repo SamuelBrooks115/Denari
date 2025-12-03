@@ -529,3 +529,130 @@ def fetch_historical_prices(
         raise last_error
     else:
         raise RuntimeError(f"Failed to fetch historical prices for {symbol}")
+
+
+def fetch_enterprise_value(
+    symbol: str,
+    limit: int = 10,
+) -> List[Dict[str, Any]]:
+    """
+    Fetch enterprise value data from FMP /stable API.
+    
+    Calls /stable/enterprise-value?symbol={symbol}&limit={limit}
+    
+    Enterprise value is calculated as: Market Cap + Total Debt - Cash and Cash Equivalents
+    
+    Args:
+        symbol: Stock ticker symbol (e.g., "F" for Ford)
+        limit: Number of periods to fetch (default: 10)
+        
+    Returns:
+        List of enterprise value dictionaries (most recent first)
+        Each dict contains fields like: enterpriseValue, marketCap, totalDebt, cashAndCashEquivalents, etc.
+        
+    Raises:
+        RuntimeError: If API call fails or returns invalid data
+    """
+    # Try different endpoint names - FMP may use different names in /stable
+    endpoints_to_try = [
+        "enterprise-value",
+        "enterprise-values",
+        "enterprisevalue",
+    ]
+    
+    params = {
+        "symbol": symbol,
+        "limit": limit,
+    }
+    
+    logger.info(f"Fetching enterprise value for {symbol} (limit={limit})")
+    
+    last_error = None
+    for endpoint_path in endpoints_to_try:
+        try:
+            data = _get_json(endpoint_path, params)
+            
+            if isinstance(data, list):
+                logger.info(f"Successfully fetched {len(data)} enterprise value record(s) for {symbol}")
+                return data
+            elif isinstance(data, dict):
+                # Some endpoints might return a single dict
+                logger.info(f"Successfully fetched enterprise value for {symbol}")
+                return [data]
+            else:
+                raise RuntimeError(
+                    f"FMP API returned unexpected data type for enterprise value: {type(data)}. "
+                    f"Expected list or dict."
+                )
+        
+        except RuntimeError as e:
+            last_error = e
+            # If it's a 404, try next endpoint
+            if "404" in str(e) or "Not Found" in str(e):
+                logger.debug(f"Endpoint {endpoint_path} returned 404, trying next...")
+                continue
+            else:
+                # Other errors, re-raise
+                raise
+    
+    # If all endpoints failed, provide helpful error message
+    if last_error and ("404" in str(last_error) or "Not Found" in str(last_error)):
+        raise RuntimeError(
+            f"Enterprise value endpoints are not available in FMP /stable API for {symbol}.\n"
+            f"Tried endpoints: {', '.join(endpoints_to_try)}\n"
+            f"\nPossible reasons:\n"
+            f"  - Enterprise value may require /api/v3 endpoints instead of /stable\n"
+            f"  - Enterprise value may require a higher subscription tier\n"
+            f"  - The endpoint name may be different in your plan\n"
+            f"\nYou can calculate enterprise value manually: EV = Market Cap + Total Debt - Cash"
+        )
+    elif last_error:
+        raise last_error
+    else:
+        raise RuntimeError(f"Failed to fetch enterprise value for {symbol}")
+
+
+def fetch_company_profile(symbol: str) -> Dict[str, Any]:
+    """
+    Fetch company profile data from FMP /stable API.
+    
+    Calls /stable/profile?symbol={symbol}
+    
+    Args:
+        symbol: Stock ticker symbol (e.g., "F" for Ford)
+        
+    Returns:
+        Dictionary with company profile data including:
+        - symbol
+        - companyName
+        - website
+        - image (logo URL)
+        - Other company metadata
+        
+    Raises:
+        RuntimeError: If API call fails or returns invalid data
+    """
+    path = "profile"
+    params = {
+        "symbol": symbol,
+    }
+    
+    logger.info(f"Fetching company profile for {symbol}")
+    
+    data = _get_json(path, params)
+    
+    # FMP profile endpoint typically returns a list with one item
+    if isinstance(data, list):
+        if len(data) > 0:
+            logger.info(f"Successfully fetched company profile for {symbol}")
+            return data[0]
+        else:
+            raise RuntimeError(f"FMP API returned empty list for {symbol} profile")
+    elif isinstance(data, dict):
+        logger.info(f"Successfully fetched company profile for {symbol}")
+        return data
+    else:
+        raise RuntimeError(
+            f"FMP API returned unexpected data type for company profile: {type(data)}. "
+            f"Expected list or dict."
+        )

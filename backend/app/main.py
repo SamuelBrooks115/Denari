@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.logging import configure_logging
-from app.api.v1 import companies, filings, financials, models, structured
+from app.api.v1 import companies, filings, financials, models, structured, branding
 
 # -----------------------------------------------------------------------------
 # App Initialization
@@ -49,6 +49,7 @@ app.include_router(filings.router)
 app.include_router(financials.router)
 app.include_router(models.router)
 app.include_router(structured.router)
+app.include_router(branding.router)
 
 # -----------------------------------------------------------------------------
 # Health Check
