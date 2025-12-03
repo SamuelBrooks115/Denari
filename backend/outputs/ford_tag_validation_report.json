@@ -1,0 +1,292 @@
+{
+  "metadata": {
+    "company": "Ford Motor Company",
+    "ticker": "F",
+    "files_processed": {
+      "single_year": "outputs/F_FY2024_single_year_llm_classified.json",
+      "multi_year": "outputs/F_multi_year_3years_llm_classified.json"
+    }
+  },
+  "summary": {
+    "total_variables": 13,
+    "passed": 11,
+    "failed": 2
+  },
+  "results": [
+    {
+      "variable": "Revenue",
+      "statement_type": "income_statement",
+      "expected_roles": [
+        "IS_REVENUE"
+      ],
+      "status": "PASS (direct)",
+      "reason": "Valid candidate found",
+      "chosen": {
+        "tag": "Revenues",
+        "label": "Revenues",
+        "model_role": "IS_REVENUE",
+        "matched_role": "IS_REVENUE",
+        "confidence": 1.0,
+        "periods_found": [
+          "2024-12-31"
+        ],
+        "latest_value": 184992000000.0
+      },
+      "alternates": []
+    },
+    {
+      "variable": "Operating Costs / Margin",
+      "statement_type": "income_statement",
+      "expected_roles": [
+        "IS_OPERATING_EXPENSE"
+      ],
+      "status": "PASS (computed)",
+      "reason": "Valid computed value found",
+      "chosen": {
+        "tag": "COMPUTED_IS_OPERATING_EXPENSE",
+        "label": "Computed: Operating Costs / Margin",
+        "model_role": "IS_OPERATING_EXPENSE",
+        "matched_role": "IS_OPERATING_EXPENSE",
+        "confidence": 1.0,
+        "periods_found": [
+          "2024-12-31"
+        ],
+        "latest_value": 179773000000.0,
+        "computation_method": "Revenue - Operating Income",
+        "supporting_tags": [
+          "Revenues",
+          "OperatingIncomeLoss"
+        ],
+        "source": "computed"
+      },
+      "alternates": []
+    },
+    {
+      "variable": "Gross Margin / Costs",
+      "statement_type": "income_statement",
+      "expected_roles": [
+        "IS_COGS"
+      ],
+      "status": "PASS (direct)",
+      "reason": "Valid candidate found",
+      "chosen": {
+        "tag": "CostOfGoodsAndServicesSold",
+        "label": "Cost of Goods and Services Sold",
+        "model_role": "IS_COGS",
+        "matched_role": "IS_COGS",
+        "confidence": 1.0,
+        "periods_found": [
+          "2024-12-31"
+        ],
+        "latest_value": 158434000000.0
+      },
+      "alternates": []
+    },
+    {
+      "variable": "EBITDA Margins / Costs",
+      "statement_type": "income_statement",
+      "expected_roles": [
+        "IS_EBITDA"
+      ],
+      "status": "PASS (computed)",
+      "reason": "Valid computed value found",
+      "chosen": {
+        "tag": "COMPUTED_IS_EBITDA",
+        "label": "Computed: EBITDA Margins / Costs",
+        "model_role": "IS_EBITDA",
+        "matched_role": "IS_EBITDA",
+        "confidence": 1.0,
+        "periods_found": [
+          "2024-12-31"
+        ],
+        "latest_value": 12786000000.0,
+        "computation_method": "Operating Income + Depreciation & Amortization",
+        "supporting_tags": [
+          "OperatingIncomeLoss",
+          "DepreciationDepletionAndAmortization"
+        ],
+        "source": "computed"
+      },
+      "alternates": []
+    },
+    {
+      "variable": "Tax Rate",
+      "statement_type": "income_statement",
+      "expected_roles": [
+        "IS_TAX_EXPENSE"
+      ],
+      "status": "PASS (direct)",
+      "reason": "Valid candidate found",
+      "chosen": {
+        "tag": "IncomeTaxExpenseBenefit",
+        "label": "Income Tax Expense (Benefit)",
+        "model_role": "IS_TAX_EXPENSE",
+        "matched_role": "IS_TAX_EXPENSE",
+        "confidence": 1.0,
+        "periods_found": [
+          "2024-12-31"
+        ],
+        "latest_value": 1339000000.0
+      },
+      "alternates": []
+    },
+    {
+      "variable": "PP&E",
+      "statement_type": "balance_sheet",
+      "expected_roles": [
+        "BS_PP_AND_E"
+      ],
+      "status": "PASS (direct)",
+      "reason": "Valid candidate found",
+      "chosen": {
+        "tag": "PropertyPlantAndEquipmentNet",
+        "label": "Property, Plant and Equipment, Net",
+        "model_role": "BS_PP_AND_E",
+        "matched_role": "BS_PP_AND_E",
+        "confidence": 1.0,
+        "periods_found": [
+          "2024-12-31"
+        ],
+        "latest_value": 41928000000.0
+      },
+      "alternates": []
+    },
+    {
+      "variable": "Inventory",
+      "statement_type": "balance_sheet",
+      "expected_roles": [
+        "BS_INVENTORY"
+      ],
+      "status": "PASS (direct)",
+      "reason": "Valid candidate found",
+      "chosen": {
+        "tag": "InventoryNet",
+        "label": "Inventory, Net",
+        "model_role": "BS_INVENTORY",
+        "matched_role": "BS_INVENTORY",
+        "confidence": 1.0,
+        "periods_found": [
+          "2024-12-31"
+        ],
+        "latest_value": 14951000000.0
+      },
+      "alternates": []
+    },
+    {
+      "variable": "Accounts Payable",
+      "statement_type": "balance_sheet",
+      "expected_roles": [
+        "BS_ACCOUNTS_PAYABLE",
+        "BS_AP_AND_ACCRUED"
+      ],
+      "status": "PASS (direct)",
+      "reason": "Valid candidate found",
+      "chosen": {
+        "tag": "AccountsPayableAndAccruedLiabilitiesCurrent",
+        "label": "Accounts Payable and Accrued Liabilities, Current",
+        "model_role": "BS_AP_AND_ACCRUED",
+        "matched_role": "BS_AP_AND_ACCRUED",
+        "confidence": 1.0,
+        "periods_found": [
+          "2024-12-31"
+        ],
+        "latest_value": 24128000000.0
+      },
+      "alternates": []
+    },
+    {
+      "variable": "Accounts Receivable",
+      "statement_type": "balance_sheet",
+      "expected_roles": [
+        "BS_ACCOUNTS_RECEIVABLE"
+      ],
+      "status": "PASS (direct)",
+      "reason": "Valid candidate found",
+      "chosen": {
+        "tag": "AccountsReceivableNetCurrent",
+        "label": "Accounts Receivable, after Allowance for Credit Loss, Current",
+        "model_role": "BS_ACCOUNTS_RECEIVABLE",
+        "matched_role": "BS_ACCOUNTS_RECEIVABLE",
+        "confidence": 1.0,
+        "periods_found": [
+          "2024-12-31"
+        ],
+        "latest_value": 14723000000.0
+      },
+      "alternates": []
+    },
+    {
+      "variable": "Accrued Expenses",
+      "statement_type": "balance_sheet",
+      "expected_roles": [
+        "BS_ACCRUED_LIABILITIES",
+        "BS_AP_AND_ACCRUED"
+      ],
+      "status": "PASS (direct)",
+      "reason": "Valid candidate found",
+      "chosen": {
+        "tag": "AccountsPayableAndAccruedLiabilitiesCurrent",
+        "label": "Accounts Payable and Accrued Liabilities, Current",
+        "model_role": "BS_AP_AND_ACCRUED",
+        "matched_role": "BS_AP_AND_ACCRUED",
+        "confidence": 1.0,
+        "periods_found": [
+          "2024-12-31"
+        ],
+        "latest_value": 24128000000.0
+      },
+      "alternates": [
+        {
+          "tag": "COMPUTED_BS_ACCRUED_LIABILITIES",
+          "label": "Computed: Accrued Expenses",
+          "model_role": "BS_ACCRUED_LIABILITIES",
+          "confidence": 1.0
+        }
+      ]
+    },
+    {
+      "variable": "Share Repurchases",
+      "statement_type": "cash_flow_statement",
+      "expected_roles": [
+        "CF_SHARE_REPURCHASES"
+      ],
+      "status": "PASS (direct)",
+      "reason": "Valid candidate found",
+      "chosen": {
+        "tag": "PaymentsForRepurchaseOfCommonStock",
+        "label": "Payments for Repurchase of Common Stock",
+        "model_role": "CF_SHARE_REPURCHASES",
+        "matched_role": "CF_SHARE_REPURCHASES",
+        "confidence": 1.0,
+        "periods_found": [
+          "2024-12-31"
+        ],
+        "latest_value": 426000000.0
+      },
+      "alternates": []
+    },
+    {
+      "variable": "Debt Amount",
+      "statement_type": "balance_sheet",
+      "expected_roles": [
+        "BS_DEBT_CURRENT",
+        "BS_DEBT_NONCURRENT"
+      ],
+      "status": "FAIL",
+      "reason": "No candidates found - variable missing or mis-tagged. Note: May need BS_DEBT_CURRENT + BS_DEBT_NONCURRENT if no combined tag",
+      "chosen": null,
+      "alternates": []
+    },
+    {
+      "variable": "Dividend as a % of Net Income",
+      "statement_type": "cash_flow_statement",
+      "expected_roles": [
+        "CF_DIVIDENDS_PAID"
+      ],
+      "status": "FAIL",
+      "reason": "No candidates found - variable missing or mis-tagged. Note: Need CF_DIVIDENDS_PAID and IS_NET_INCOME",
+      "chosen": null,
+      "alternates": []
+    }
+  ]
+}

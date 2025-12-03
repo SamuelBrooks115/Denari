@@ -21,6 +21,7 @@ IS_RD_EXPENSE = "IS_RD_EXPENSE"
 IS_SGA_EXPENSE = "IS_SGA_EXPENSE"
 IS_OPERATING_INCOME = "IS_OPERATING_INCOME"
 IS_EBITDA = "IS_EBITDA"
+IS_D_AND_A = "IS_D_AND_A"  # Depreciation and Amortization
 IS_NON_OPERATING_INCOME = "IS_NON_OPERATING_INCOME"
 IS_INTEREST_EXPENSE = "IS_INTEREST_EXPENSE"
 IS_TAX_EXPENSE = "IS_TAX_EXPENSE"
@@ -39,6 +40,7 @@ BS_ASSETS_NONCURRENT = "BS_ASSETS_NONCURRENT"
 BS_ASSETS_TOTAL = "BS_ASSETS_TOTAL"
 BS_ACCOUNTS_PAYABLE = "BS_ACCOUNTS_PAYABLE"
 BS_ACCRUED_LIABILITIES = "BS_ACCRUED_LIABILITIES"
+BS_AP_AND_ACCRUED = "BS_AP_AND_ACCRUED"  # Combined Accounts Payable and Accrued Liabilities
 BS_DEBT_CURRENT = "BS_DEBT_CURRENT"
 BS_LIABILITIES_CURRENT = "BS_LIABILITIES_CURRENT"
 BS_DEBT_NONCURRENT = "BS_DEBT_NONCURRENT"
@@ -103,6 +105,11 @@ MODEL_ROLE_MAP: Dict[str, Dict[str, bool]] = {
         "is_core_3_statement": True,
         "is_dcf_key": True,
         "is_comps_key": True,
+    },
+    IS_D_AND_A: {
+        "is_core_3_statement": True,
+        "is_dcf_key": True,
+        "is_comps_key": False,
     },
     IS_NON_OPERATING_INCOME: {
         "is_core_3_statement": True,
@@ -181,6 +188,11 @@ MODEL_ROLE_MAP: Dict[str, Dict[str, bool]] = {
         "is_comps_key": False,
     },
     BS_ACCRUED_LIABILITIES: {
+        "is_core_3_statement": True,
+        "is_dcf_key": False,
+        "is_comps_key": False,
+    },
+    BS_AP_AND_ACCRUED: {
         "is_core_3_statement": True,
         "is_dcf_key": False,
         "is_comps_key": False,
@@ -324,6 +336,7 @@ def get_valid_roles_for_statement(statement_type: str) -> List[str]:
             IS_SGA_EXPENSE,
             IS_OPERATING_INCOME,
             IS_EBITDA,
+            IS_D_AND_A,
             IS_NON_OPERATING_INCOME,
             IS_INTEREST_EXPENSE,
             IS_TAX_EXPENSE,
@@ -343,6 +356,7 @@ def get_valid_roles_for_statement(statement_type: str) -> List[str]:
             BS_ASSETS_TOTAL,
             BS_ACCOUNTS_PAYABLE,
             BS_ACCRUED_LIABILITIES,
+            BS_AP_AND_ACCRUED,
             BS_DEBT_CURRENT,
             BS_LIABILITIES_CURRENT,
             BS_DEBT_NONCURRENT,
