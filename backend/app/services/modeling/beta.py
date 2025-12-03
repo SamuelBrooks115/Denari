@@ -134,7 +134,10 @@ def build_beta_export_payload(
 
     combined = ticker_prices.join(benchmark_prices, how="inner")
     combined.reset_index(inplace=True)
-    combined.rename(columns={"Date": "date"}, inplace=True)
+    # reset_index() will create a "date" column since we named the index "date"
+    # Ensure date column is named "date" (reset_index should create it from named index)
+    if "Date" in combined.columns:
+        combined.rename(columns={"Date": "date"}, inplace=True)
 
     return {
         "ticker": ticker,

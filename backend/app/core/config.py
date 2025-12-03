@@ -27,7 +27,7 @@ This module does NOT:
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Find .env file relative to backend directory
@@ -76,6 +76,18 @@ class Settings(BaseSettings):
         description="Exponential backoff base for retry delays",
     )
 
+    # S&P 500 Ticker Source - Required for ingestion
+    SP500_TICKER_SOURCE: str = Field(
+        "",
+        description="Path or URL to S&P 500 ticker list (CSV or JSON format)",
+    )
+
+    # Database - Required for data persistence
+    SUPABASE_DB_URL: str = Field(
+        "",
+        description="PostgreSQL connection string (format: postgresql://user:password@host:port/database)",
+    )
+
     # LLM API - For classifying EDGAR facts
     LLM_ENABLED: bool = Field(
         True,
@@ -85,9 +97,13 @@ class Settings(BaseSettings):
         "openai",
         description="LLM provider: 'openai' or 'anthropic'",
     )
+    OPENAI_API_KEY_PATH: str = Field(
+        "",
+        description="Path to file containing OpenAI API key (alternative to OPENAI_API_KEY)",
+    )
     OPENAI_API_KEY: str = Field(
         "",
-        description="OpenAI API key for LLM classification (optional, can be empty if LLM_ENABLED=False)",
+        description="OpenAI API key for LLM classification (optional, can be empty if LLM_ENABLED=False or if OPENAI_API_KEY_PATH is set)",
     )
     
     @field_validator('OPENAI_API_KEY', mode='before')
@@ -97,6 +113,21 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return v.strip()
         return v or ""
+    
+    @model_validator(mode='after')
+    def load_api_key_from_file(self) -> 'Settings':
+        """Load API key from file if OPENAI_API_KEY_PATH is provided."""
+        if self.OPENAI_API_KEY_PATH and not self.OPENAI_API_KEY:
+            key_path = Path(self.OPENAI_API_KEY_PATH).expanduser()
+            if key_path.exists():
+                try:
+                    with key_path.open('r', encoding='utf-8') as f:
+                        self.OPENAI_API_KEY = f.read().strip()
+                except Exception as e:
+                    raise ValueError(f"Failed to read API key from {key_path}: {e}")
+            else:
+                raise ValueError(f"API key file not found: {key_path}")
+        return self
     OPENAI_MODEL: str = Field(
         "gpt-4o-mini",
         description="OpenAI model to use for classification",
