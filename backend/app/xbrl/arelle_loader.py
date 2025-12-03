@@ -1,6 +1,9 @@
 """
 arelle_loader.py — Arelle-based XBRL instance loader.
 
+DEPRECATED — This module has been replaced by the FMP-based pipeline.
+See app/data/fmp_client.py for the new implementation.
+
 This module provides a clean interface to load and work with XBRL instances using Arelle.
 It abstracts away Arelle-specific details and provides a simple API for loading XBRL files.
 

@@ -1,6 +1,8 @@
 """
 statement_extractor.py — Extract Balance Sheet, Income Statement, and Cash Flow from Arelle ModelXbrl.
 
+LEGACY: Replaced by FMP /stable-based pipeline (see app/data/fmp_client.py).
+
 This module extracts financial statements from an Arelle ModelXbrl object and maps them
 to our standardized "master chart of accounts" format.
 

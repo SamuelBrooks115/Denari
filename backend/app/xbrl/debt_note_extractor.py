@@ -1,6 +1,8 @@
 """
 debt_note_extractor.py — Extract Note 18 (Debt and Commitments) from Arelle ModelXbrl.
 
+LEGACY: Replaced by FMP /stable-based pipeline (see app/data/fmp_client.py).
+
 This module extracts detailed debt information from Note 18 disclosure tables,
 including segment breakdowns (Company excluding Ford Credit, Ford Credit, Consolidated)
 and maturity buckets (within one year, after one year, etc.).

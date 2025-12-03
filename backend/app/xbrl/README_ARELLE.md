@@ -30,6 +30,12 @@ The pipeline uses **Arelle** (Python XBRL engine) to directly parse XBRL instanc
    - `DebtCell`: Represents one debt fact with segment and maturity
    - `Note18DebtTable`: Complete table with aggregation methods
 
+4. **`fact_enricher.py`**: Enriches XBRL facts with rich metadata for display line identification
+   - `enrich_fact_with_metadata()`: Main entry point for fact enrichment
+   - Adds role/presentation tree information, dimensions, stable display identifiers
+   - Provides `calc_bucket` classification for debt facts
+   - See [Fact Enrichment](#fact-enrichment) section below for details
+
 ## Installation
 
 ### Install Arelle
@@ -95,6 +101,107 @@ The `MASTER_MAP` in `statement_extractor.py` maps XBRL concepts to normalized li
 - **Cash Flow**: Operating, Investing, Financing activities
 
 Each normalized line item has multiple candidate XBRL concepts (in precedence order).
+
+## Fact Enrichment
+
+The `fact_enricher.py` module adds comprehensive metadata to XBRL facts to uniquely identify which line item in the 10-K each fact corresponds to. This is essential when multiple facts share the same XBRL concept (e.g., `us-gaap:DebtCurrent`).
+
+### Enriched Fields
+
+Each enriched fact dictionary includes:
+
+#### Concept Metadata
+- `concept_local_name`: Local name of the concept (e.g., `"DebtCurrent"`)
+- `standard_label`: Standard label from taxonomy (e.g., `"Debt, Current"`)
+- `doc_label`: Documentation label if available
+
+#### Presentation Metadata
+- `role_uri`: Full role URI where fact appears (e.g., `"http://www.ford.com/role/ConsolidatedBalanceSheet"`)
+- `role_name`: Short role name (e.g., `"ConsolidatedBalanceSheet"`)
+- `parent_label`: Label of parent presentation node
+- `order`: Presentation order within parent
+
+#### Dimensions
+- `dimensions`: Dictionary mapping dimension QName to member QName
+  ```json
+  {
+    "f:BusinessSectorAxis": "f:ConsolidatedMember",
+    "us-gaap:StatementClassOfStockAxis": "us-gaap:CommonStockMember"
+  }
+  ```
+
+#### Period Metadata
+- `period_start`: ISO date of period start (for duration periods)
+- `period_end`: ISO date of period end
+
+#### Display Identifiers
+- `display_role`: Normalized role identifier (e.g., `"ConsolidatedBalanceSheet"`)
+- `line_item_id`: Stable ID combining role + concept + dimensions
+  - Format: `<display_role>__<concept_local_name>__<dimensions_key>`
+  - Example: `"ConsolidatedBalanceSheet__DebtCurrent__Consolidated"`
+- `display_line_id`: Visual line ID including parent and period
+  - Format: `<display_role>__<parent_label_normalized>__<concept_local_name>__<period_end>`
+  - Example: `"ConsolidatedBalanceSheet__total_liabilities__DebtCurrent__2024-12-31"`
+
+#### Debt Classification
+- `calc_bucket`: Classification for debt calculation
+  - `"interest_bearing_debt_total_component"`: Component of total interest-bearing debt (consolidated balance sheet totals)
+  - `"interest_bearing_debt_detail_only"`: Note/instrument-level detail, not used for totals
+  - `null`: Not related to interest-bearing debt
+
+### Usage
+
+```python
+from app.xbrl.fact_enricher import enrich_fact_with_metadata
+
+# Create base fact record
+fact_record = {
+    "concept_qname": "us-gaap:DebtCurrent",
+    "value": 1000000,
+    "unit": "USD",
+    "end": "2024-12-31",
+}
+
+# Enrich with metadata
+enrich_fact_with_metadata(fact, model_xbrl, fact_record)
+
+# fact_record now includes all enriched fields
+print(fact_record["display_role"])  # "ConsolidatedBalanceSheet"
+print(fact_record["line_item_id"])  # "ConsolidatedBalanceSheet__DebtCurrent__Consolidated"
+print(fact_record["calc_bucket"])   # "interest_bearing_debt_total_component"
+```
+
+### Testing Debt Classification
+
+Use the test script to verify debt classification:
+
+```bash
+python scripts/test_fact_enrichment_ford_2024.py \
+    --xbrl-file data/xbrl/ford_2024_10k.ixbrl \
+    --fiscal-year 2024
+```
+
+This will:
+1. Load and enrich all facts
+2. Filter facts with `calc_bucket == "interest_bearing_debt_total_component"`
+3. Print contributing facts and total sum
+4. Verify the classification selects the right line items
+
+### Integration
+
+The enrichment is automatically applied in:
+- `scripts/arelle_raw_dump_ford_2024.py`: All facts are enriched when dumped to JSON
+
+To integrate into your own extraction:
+
+```python
+from app.xbrl.fact_enricher import enrich_fact_with_metadata
+
+for fact in model_xbrl.facts:
+    fact_record = {...}  # Your base fact dict
+    enrich_fact_with_metadata(fact, model_xbrl, fact_record)
+    # fact_record now has all enriched fields
+```
 
 ## Note 18 Extraction
 

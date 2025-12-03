@@ -1,11 +1,11 @@
 """
-fetch_fmp_stable_raw.py — Fetch and cache raw FMP financial data using /stable endpoints.
+fetch_ford_fmp_stable_raw.py — Fetch and cache raw FMP financial data using /stable endpoints.
 
 This script fetches income statement, balance sheet, and cash flow data
-from the FMP /stable API and caches them to JSON files for any ticker.
+from the FMP /stable API and caches them to JSON files.
 
 Example (PowerShell):
-    python scripts/fetch_fmp_stable_raw.py `
+    python scripts/fetch_ford_fmp_stable_raw.py `
         --symbol F `
         --limit 10 `
         --output-dir data/fmp_stable_raw
@@ -36,8 +36,8 @@ def main():
     parser.add_argument(
         "--symbol",
         type=str,
-        required=True,
-        help="Stock ticker symbol (e.g., F, AAPL, MSFT)",
+        default="F",
+        help="Stock ticker symbol (default: F for Ford)",
     )
     parser.add_argument(
         "--limit",
@@ -92,27 +92,9 @@ def main():
         logger.info(f"Wrote {len(cash_flow_data)} cash flow statement(s) to {cash_flow_file}")
         
         print(f"\n✓ Successfully fetched and cached FMP /stable data for {symbol}")
-<<<<<<< Updated upstream
-        print(f"  Income Statement: {income_file}")
-        print(f"  Balance Sheet: {balance_file}")
-        print(f"  Cash Flow: {cash_flow_file}")
-        
-        # Show summary of most recent period
-        if income_data:
-            latest = income_data[0]
-            print(f"\nMost Recent Period:")
-            print(f"  Date: {latest.get('date', 'N/A')}")
-            print(f"  Fiscal Year: {latest.get('fiscalYear', 'N/A')}")
-            print(f"  Period: {latest.get('period', 'N/A')}")
-            if latest.get('revenue'):
-                print(f"  Revenue: ${latest.get('revenue', 0):,.0f}")
-            if latest.get('netIncome'):
-                print(f"  Net Income: ${latest.get('netIncome', 0):,.0f}")
-=======
         print(f"  Income statement: {income_file} ({len(income_data)} periods)")
         print(f"  Balance sheet: {balance_file} ({len(balance_data)} periods)")
         print(f"  Cash flow: {cash_flow_file} ({len(cash_flow_data)} periods)")
->>>>>>> Stashed changes
     
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
