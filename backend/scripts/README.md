@@ -1,5 +1,99 @@
 # Scripts Directory
 
+## fetch_fmp_industry_screener.py
+
+Standalone script to fetch and export company screener results from FMP /stable API.
+
+### Features
+
+- **Filter by sector, industry, and market cap range**
+- **Pagination support** (page and limit parameters)
+- **Exports results to JSON** with filter metadata
+- **Command-line interface** for easy automation
+
+### Usage
+
+```powershell
+# Search for Technology companies with market cap between $10B and $1T
+python scripts/fetch_fmp_industry_screener.py `
+    --sector "Technology" `
+    --min-cap 10000000000 `
+    --max-cap 1000000000000 `
+    --output-json data/fmp_stable_raw/tech_companies.json
+
+# Search for specific industry
+python scripts/fetch_fmp_industry_screener.py `
+    --industry "Consumer Electronics" `
+    --min-cap 100000000000 `
+    --output-json data/fmp_stable_raw/consumer_electronics.json
+
+# Get all companies (no filters) with pagination
+python scripts/fetch_fmp_industry_screener.py `
+    --output-json data/fmp_stable_raw/all_companies_page1.json `
+    --limit 200 `
+    --page 0
+
+# Get next page
+python scripts/fetch_fmp_industry_screener.py `
+    --output-json data/fmp_stable_raw/all_companies_page2.json `
+    --limit 200 `
+    --page 1
+```
+
+### Arguments
+
+- `--sector` (optional) - Filter by sector (e.g., "Technology", "Healthcare")
+- `--industry` (optional) - Filter by industry (e.g., "Consumer Electronics", "Banks—Regional")
+- `--min-cap` (optional) - Minimum market cap in dollars (e.g., 10000000000 for $10B)
+- `--max-cap` (optional) - Maximum market cap in dollars (e.g., 1000000000000 for $1T)
+- `--page` (optional, default: 0) - Page number (0-indexed)
+- `--limit` (optional, default: 100, max: 200) - Number of results per page
+- `--output-json` (optional, default: `data/fmp_stable_raw/screener_results.json`) - Output JSON file path
+
+### Output Structure
+
+The JSON output includes:
+
+```json
+{
+  "filters": {
+    "sector": "Technology",
+    "industry": null,
+    "minCap": 10000000000,
+    "maxCap": 1000000000000,
+    "page": 0,
+    "limit": 100
+  },
+  "resultCount": 50,
+  "results": [
+    {
+      "symbol": "AAPL",
+      "companyName": "Apple Inc.",
+      "sector": "Technology",
+      "industry": "Consumer Electronics",
+      "marketCap": 4228844465070,
+      "website": "https://www.apple.com",
+      "image": "https://images.financialmodelingprep.com/symbol/AAPL.png",
+      "description": "Apple Inc. designs, manufactures...",
+      "ceo": "Timothy D. Cook",
+      "fullTimeEmployees": 164000
+    }
+  ]
+}
+```
+
+### Requirements
+
+- `FMP_API_KEY` environment variable set (required by FMP API)
+- Internet connection
+
+### Notes
+
+- Market cap values should be in dollars (e.g., 10000000000 for $10B)
+- The script validates that min-cap <= max-cap if both are provided
+- Results are paginated; use `--page` to fetch additional pages
+- Maximum limit is 200 results per page
+
 ## download_ford_2024_ixbrl.py
 
 Automated script to download Ford Motor Company's 2024 10-K iXBRL file from SEC EDGAR.
