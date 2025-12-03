@@ -17,6 +17,7 @@ dependencies = [
     "psycopg[binary] (>=3.2.12,<4.0.0)",
     "sqlalchemy (>=2.0.44,<3.0.0)",
     "xlsxwriter (>=3.2.9,<4.0.0)",
+    "openpyxl (>=3.1.0,<4.0.0)",
     "uvicorn (>=0.38.0,<0.39.0)",
     "requests (>=2.31.0,<3.0.0)",
     "tenacity (>=8.2.3,<9.0.0)",
