@@ -110,6 +110,20 @@ class Settings(BaseSettings):
         description="Maximum retry attempts for LLM API calls",
     )
 
+    # Financial Modeling Prep API - For company profile data
+    FMP_API_KEY: str = Field(
+        "",
+        description="Financial Modeling Prep API key for company profile and image data",
+    )
+    
+    @field_validator('FMP_API_KEY', mode='before')
+    @classmethod
+    def strip_fmp_api_key(cls, v: Any) -> str:
+        """Strip whitespace from FMP API key."""
+        if isinstance(v, str):
+            return v.strip()
+        return v or ""
+
     model_config = SettingsConfigDict(
         env_file=_ENV_FILE_PATH,
         env_file_encoding="utf-8",

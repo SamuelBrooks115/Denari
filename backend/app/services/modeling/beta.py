@@ -11,13 +11,29 @@ the model stays auditable for analysts.
 """
 
 from datetime import datetime, timedelta
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 
 import pandas as pd
 import yfinance as yf
 
 
-DEFAULT_LOOKBACK_DAYS = 1825  # 5Y of calendar days (approximately 5 years)
+# Benchmark options
+BENCHMARK_OPTIONS = {
+    "^GSPC": "S&P 500",
+    "^IXIC": "NASDAQ",
+    "^RUT": "Russell 2000",
+    "^DJI": "Dow Jones Industrial Average",
+}
+
+# Year options (in days)
+YEAR_OPTIONS = {
+    1: 365,   # 1 year
+    3: 1095,  # 3 years (365 * 3)
+    5: 1825,  # 5 years (365 * 5)
+}
+
+DEFAULT_LOOKBACK_YEARS = 5
+DEFAULT_LOOKBACK_DAYS = YEAR_OPTIONS[DEFAULT_LOOKBACK_YEARS]
 DEFAULT_BENCHMARK = "^GSPC"  # S&P 500
 
 
@@ -25,13 +41,26 @@ def fetch_price_history(
     ticker: str,
     benchmark: str = DEFAULT_BENCHMARK,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+    lookback_years: Optional[int] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Pull adjusted close prices for ticker and benchmark over the lookback window.
 
+    Args:
+        ticker: Stock ticker symbol
+        benchmark: Benchmark index symbol (e.g., "^GSPC" for S&P 500)
+        lookback_days: Number of days to look back (overridden by lookback_years if provided)
+        lookback_years: Number of years to look back (1, 3, or 5). If provided, overrides lookback_days.
+
     Returns:
         (ticker_prices, benchmark_prices) as dataframes indexed by date
     """
+    # Use years if provided, otherwise use days
+    if lookback_years is not None:
+        if lookback_years not in YEAR_OPTIONS:
+            raise ValueError(f"lookback_years must be 1, 3, or 5, got {lookback_years}")
+        lookback_days = YEAR_OPTIONS[lookback_years]
+    
     end = datetime.utcnow()
     start = end - timedelta(days=lookback_days)
 
@@ -71,17 +100,36 @@ def fetch_price_history(
 def build_beta_export_payload(
     ticker: str,
     benchmark: str = DEFAULT_BENCHMARK,
-    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+    lookback_days: Optional[int] = None,
+    lookback_years: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Convenience wrapper that returns everything Excel export needs:
         - aligned price dataframe (date | ticker | benchmark)
         - metadata for labeling
+    
+    Args:
+        ticker: Stock ticker symbol
+        benchmark: Benchmark index symbol (e.g., "^GSPC" for S&P 500)
+        lookback_days: Number of days to look back (optional, overridden by lookback_years)
+        lookback_years: Number of years to look back (1, 3, or 5). Preferred over lookback_days.
+    
+    Returns:
+        Dictionary with ticker, benchmark, lookback_days, and price_table
     """
+    # Use default if neither is provided
+    if lookback_days is None and lookback_years is None:
+        lookback_days = DEFAULT_LOOKBACK_DAYS
+    
+    # Validate benchmark
+    if benchmark not in BENCHMARK_OPTIONS:
+        raise ValueError(f"benchmark must be one of {list(BENCHMARK_OPTIONS.keys())}, got {benchmark}")
+    
     ticker_prices, benchmark_prices = fetch_price_history(
         ticker=ticker,
         benchmark=benchmark,
         lookback_days=lookback_days,
+        lookback_years=lookback_years,
     )
 
     combined = ticker_prices.join(benchmark_prices, how="inner")
@@ -129,10 +177,11 @@ def write_beta_sheet(workbook, beta_payload):
     worksheet.write(0, 1, beta_payload["ticker"])
     
     worksheet.write(1, 0, "Benchmark", header_format)
-    # Display benchmark name nicely (^GSPC -> S&P 500)
-    benchmark_display = beta_payload["benchmark"]
-    if benchmark_display == "^GSPC":
-        benchmark_display = "S&P 500"
+    # Display benchmark name nicely using BENCHMARK_OPTIONS mapping
+    benchmark_display = BENCHMARK_OPTIONS.get(
+        beta_payload["benchmark"], 
+        beta_payload["benchmark"]
+    )
     worksheet.write(1, 1, benchmark_display)
     
     worksheet.write(2, 0, "Lookback (years)", header_format)
