@@ -18,6 +18,20 @@ import json
 import sys
 from pathlib import Path
 
+# Add backend directory to Python path (same approach as test.py)
+backend_dir = Path(__file__).parent.parent
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
+
+# Load environment variables from .env file (same as fmp_client.py does)
+try:
+    from dotenv import load_dotenv
+    env_file = backend_dir.parent / ".env"
+    if env_file.exists():
+        load_dotenv(env_file)
+except ImportError:
+    pass  # dotenv not available, rely on environment variables
+
 from app.data.fmp_client import (
     fetch_balance_sheet,
     fetch_cash_flow,
