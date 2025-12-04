@@ -3,12 +3,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Download, Settings, FileSpreadsheet, TrendingUp, TrendingDown } from "lucide-react";
+import { Download, Settings, FileSpreadsheet, TrendingUp, TrendingDown, Plus } from "lucide-react";
 import { useState } from "react";
 import { downloadExcelFromTemplate } from "@/lib/downloadExcel";
 import { Slider } from "@/components/ui/slider";
+import { useNavigate } from "react-router-dom";
 
 export default function ModelPage() {
+  const navigate = useNavigate();
+  
   // Shared CSS for financial tables to ensure divider alignment
   const financialTableStyle = `
     .financial-table {
@@ -160,18 +163,29 @@ export default function ModelPage() {
               <h1 className="text-4xl font-bold text-denari-1">Main Model</h1>
               <p className="text-muted-foreground mt-1">AAPL - Apple Inc.</p>
             </div>
-            <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm">
-                <Settings className="h-4 w-4 mr-2" />
-                Settings
-              </Button>
+            <div className="inline-flex flex-col items-end gap-3">
+              <div className="flex items-center gap-3">
+                <Button variant="outline" size="sm">
+                  <Settings className="h-4 w-4 mr-2" />
+                  Settings
+                </Button>
+                <Button 
+                  size="sm" 
+                  className="bg-denari-3 hover:bg-denari-3/90"
+                  onClick={handleExport}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                </Button>
+              </div>
               <Button 
-                size="sm" 
-                className="bg-denari-3 hover:bg-denari-3/90"
-                onClick={handleExport}
+                variant="outline" 
+                size="sm"
+                className="w-full"
+                onClick={() => navigate("/app/projects/new")}
               >
-                <Download className="h-4 w-4 mr-2" />
-                Export
+                <Plus className="h-4 w-4 mr-2" />
+                New Project
               </Button>
             </div>
           </div>

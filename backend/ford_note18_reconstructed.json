@@ -1,0 +1,13 @@
+{
+  "company": "Ford Motor Co",
+  "cik": "0000037996",
+  "fiscal_year": 2024,
+  "report_date": "2024-12-31",
+  "rows": [
+    {
+      "segment": "consolidated",
+      "bucket": "after_one_year",
+      "amount": 1096000000.0
+    }
+  ]
+}
