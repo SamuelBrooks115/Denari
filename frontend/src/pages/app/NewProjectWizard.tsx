@@ -13,7 +13,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Progress } from "@/components/ui/progress";
 import { Search, ArrowRight, ArrowLeft, CheckCircle, Loader2 } from "lucide-react";
 
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { 
   convertWizardDataToProjectData, 
   saveProjectDataToFile, 
@@ -43,6 +43,24 @@ export default function NewProjectWizard() {
   const [competitorOpen, setCompetitorOpen] = useState(false);
   const [allCompanies, setAllCompanies] = useState<TickerData[]>([]);
   const [isLoadingCompanies, setIsLoadingCompanies] = useState(false);
+  const [historicalData, setHistoricalData] = useState<{
+    ticker: string;
+    historicals: {
+      revenueGrowth: number[];
+      grossMargin: number[];
+      operatingMargin: number[];
+      taxRate: number[];
+      depreciationPctPPE: number[];
+      totalDebt: number[];
+      inventory: number[];
+      capexPctPPE: number[];
+      capexPctRevenue: number[];
+      shareRepurchases: number[];
+      dividendsPctNI: number[];
+      changeInWorkingCapital: number[];
+    };
+  } | null>(null);
+  const [isLoadingHistorical, setIsLoadingHistorical] = useState(false);
   
   const [currentStep, setCurrentStep] = useState<WizardStep>("search");
   const [isSearching, setIsSearching] = useState(false);
@@ -51,22 +69,26 @@ export default function NewProjectWizard() {
     companyName: "",
     ticker: "",
     // Income Statement - 5 year forecast values
-    revenueMethod: "step" as "stable" | "step" | "manual",
+    revenueMethod: "stable" as "stable" | "step" | "manual",
     revenueStableValue: "",
     revenueStepValue: "",
     revenueValues: ["", "", "", "", ""],
-    grossMarginMethod: "step" as "stable" | "step" | "manual",
+    grossMarginMethod: "stable" as "stable" | "step" | "manual",
     grossMarginStableValue: "",
     grossMarginStepValue: "",
     grossMarginValues: ["", "", "", "", ""],
-    operatingMarginMethod: "step" as "stable" | "step" | "manual",
+    operatingMarginMethod: "stable" as "stable" | "step" | "manual",
     operatingMarginStableValue: "",
     operatingMarginStepValue: "",
     operatingMarginValues: ["", "", "", "", ""],
-    taxRateMethod: "step" as "stable" | "step" | "manual",
+    taxRateMethod: "stable" as "stable" | "step" | "manual",
     taxRateStableValue: "",
     taxRateStepValue: "",
     taxRateValues: ["", "", "", "", ""],
+    interestRateOnDebtMethod: "stable" as "stable" | "step" | "manual",
+    interestRateOnDebtStableValue: "",
+    interestRateOnDebtStepValue: "",
+    interestRateOnDebtValues: ["", "", "", "", ""],
     // Balance Sheet
     depreciationMethod: "stable" as "stable" | "step" | "custom",
     depreciationStableValue: "",
@@ -107,19 +129,19 @@ export default function NewProjectWizard() {
     terminalGrowthRate: "2.5",
     scenario: "bear" as "bear" | "bull",
     // Bear/Bull Scenario Assumptions
-    bearRevenueMethod: "step" as "stable" | "step" | "manual",
+    bearRevenueMethod: "stable" as "stable" | "step" | "manual",
     bearRevenueStableValue: "",
     bearRevenueStepValue: "",
     bearRevenueValues: ["", "", "", "", ""],
-    bearGrossMarginMethod: "step" as "stable" | "step" | "manual",
+    bearGrossMarginMethod: "stable" as "stable" | "step" | "manual",
     bearGrossMarginStableValue: "",
     bearGrossMarginStepValue: "",
     bearGrossMarginValues: ["", "", "", "", ""],
-    bearOperatingMarginMethod: "step" as "stable" | "step" | "manual",
+    bearOperatingMarginMethod: "stable" as "stable" | "step" | "manual",
     bearOperatingMarginStableValue: "",
     bearOperatingMarginStepValue: "",
     bearOperatingMarginValues: ["", "", "", "", ""],
-    bearTaxRateMethod: "step" as "stable" | "step" | "manual",
+    bearTaxRateMethod: "stable" as "stable" | "step" | "manual",
     bearTaxRateStableValue: "",
     bearTaxRateStepValue: "",
     bearTaxRateValues: ["", "", "", "", ""],
@@ -130,19 +152,19 @@ export default function NewProjectWizard() {
     bearChangeInWCStableValue: "",
     bearChangeInWCStepValue: "",
     bearChangeInWCValues: ["", "", "", "", ""],
-    bullRevenueMethod: "step" as "stable" | "step" | "manual",
+    bullRevenueMethod: "stable" as "stable" | "step" | "manual",
     bullRevenueStableValue: "",
     bullRevenueStepValue: "",
     bullRevenueValues: ["", "", "", "", ""],
-    bullGrossMarginMethod: "step" as "stable" | "step" | "manual",
+    bullGrossMarginMethod: "stable" as "stable" | "step" | "manual",
     bullGrossMarginStableValue: "",
     bullGrossMarginStepValue: "",
     bullGrossMarginValues: ["", "", "", "", ""],
-    bullOperatingMarginMethod: "step" as "stable" | "step" | "manual",
+    bullOperatingMarginMethod: "stable" as "stable" | "step" | "manual",
     bullOperatingMarginStableValue: "",
     bullOperatingMarginStepValue: "",
     bullOperatingMarginValues: ["", "", "", "", ""],
-    bullTaxRateMethod: "step" as "stable" | "step" | "manual",
+    bullTaxRateMethod: "stable" as "stable" | "step" | "manual",
     bullTaxRateStableValue: "",
     bullTaxRateStepValue: "",
     bullTaxRateValues: ["", "", "", "", ""],
@@ -416,6 +438,85 @@ export default function NewProjectWizard() {
   // Show unavailable option for competitors if no matches found
   const showUnavailableCompetitorOption = competitorSearchQuery.trim().length > 0 && filteredCompetitors.length === 0 && !isLoadingCompanies;
 
+  // Check for pre-filled company from navigation state (e.g., from Industry Screener)
+  useEffect(() => {
+    const state = (location as any).state as { company?: { name: string; ticker: string } } | null | undefined;
+    if (state?.company) {
+      const { name, ticker } = state.company;
+      
+      // Scroll to top when navigating with pre-filled company
+      setTimeout(() => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }, 100);
+      
+      // Wait for companies to load, then find and select the company
+      const selectCompany = () => {
+        if (allCompanies.length > 0 && ticker && ticker !== "N/A") {
+          // Find the company in the list by ticker (case-insensitive)
+          const foundCompany = allCompanies.find(
+            (c) => c.symbol.toUpperCase() === ticker.toUpperCase()
+          );
+          
+          if (foundCompany) {
+            // Company found in list - select it properly using handleCompanySelect
+            // This will set the company name in the input field and close the popover
+            handleCompanySelect(foundCompany);
+          } else {
+            // Company not found in list - set manually with the provided name
+            setSelectedCompany({ name, ticker });
+            setWizardData((prev) => ({ ...prev, companyName: name, ticker: ticker }));
+            setSearchQuery(name); // Set the company name in the input field
+            setOpen(false); // Close the popover
+            fetchHistoricalData(ticker);
+          }
+        } else if (ticker && ticker !== "N/A") {
+          // Companies not loaded yet, set manually and fetch historical data
+          setSelectedCompany({ name, ticker });
+          setWizardData((prev) => ({ ...prev, companyName: name, ticker: ticker }));
+          setSearchQuery(name); // Set the company name in the input field
+          setOpen(false); // Close the popover
+          fetchHistoricalData(ticker);
+        } else {
+          // Invalid ticker, just set the name
+          setSelectedCompany({ name, ticker });
+          setWizardData((prev) => ({ ...prev, companyName: name, ticker: ticker }));
+          setSearchQuery(name); // Set the company name in the input field
+          setOpen(false); // Close the popover
+        }
+        
+        // Clear the state to prevent re-applying on re-renders
+        window.history.replaceState({}, document.title);
+      };
+      
+      // If companies are already loaded, select immediately
+      // Otherwise, wait for them to load (with retries)
+      if (allCompanies.length > 0) {
+        selectCompany();
+      } else {
+        // Wait for companies to load, with multiple retries
+        let retries = 0;
+        const maxRetries = 10; // Try for up to 5 seconds (10 * 500ms)
+        
+        const trySelect = () => {
+          if (allCompanies.length > 0) {
+            selectCompany();
+          } else if (retries < maxRetries) {
+            retries++;
+            setTimeout(trySelect, 500);
+          } else {
+            // Companies still not loaded after max retries, set manually
+            selectCompany();
+          }
+        };
+        
+        const timeoutId = setTimeout(trySelect, 500);
+        
+        return () => clearTimeout(timeoutId);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [(location as any).state, allCompanies]);
+
   const handleCompanySelect = (company: TickerData | "unavailable") => {
     if (company === "unavailable") {
       const unavailableCompany = {
@@ -430,13 +531,64 @@ export default function NewProjectWizard() {
       setSelectedCompany(selected);
       setWizardData({ ...wizardData, companyName: selected.name, ticker: selected.ticker });
       setSearchQuery(selected.name);
+      
+      // Fetch historical data when a valid ticker is selected
+      fetchHistoricalData(selected.ticker);
     }
     setOpen(false);
+  };
+
+  // Fetch historical financial data from backend when ticker is selected
+  const fetchHistoricalData = async (ticker: string) => {
+    // Skip if ticker is "N/A" or unavailable
+    if (!ticker || ticker === "N/A" || ticker === "unavailable") {
+      setHistoricalData(null);
+      return;
+    }
+
+    setIsLoadingHistorical(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/historical/metrics`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ticker: ticker,
+          limit: 40,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch historical data: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setHistoricalData(data);
+      console.log("Historical data fetched successfully:", data);
+    } catch (error) {
+      console.error("Error fetching historical data:", error);
+      // Don't show error toast - this is background data, not critical for user flow
+      setHistoricalData(null);
+    } finally {
+      setIsLoadingHistorical(false);
+    }
   };
 
   const handleFinish = () => {
     if (!selectedCompany) {
       toast.error("Please select a company");
+      return;
+    }
+    
+    // Validate that 4 competitors are selected
+    if (!wizardData.competitors || wizardData.competitors.length < 4) {
+      toast.error(`Please select exactly 4 competitors. Currently selected: ${wizardData.competitors?.length || 0}`);
+      return;
+    }
+    
+    if (wizardData.competitors.length > 4) {
+      toast.error(`Please select exactly 4 competitors. Currently selected: ${wizardData.competitors.length}`);
       return;
     }
     
@@ -462,7 +614,8 @@ export default function NewProjectWizard() {
       const projectData = convertWizardDataToProjectData(
         wizardData,
         selectedCompany.name,
-        selectedCompany.ticker
+        selectedCompany.ticker,
+        historicalData // Pass historical data to be included in project JSON
       );
       
       // Output JSON to console for verification
@@ -485,62 +638,6 @@ export default function NewProjectWizard() {
     }
   };
 
-  // Mock historical financials (last 3 years)
-  const historicalFinancials = {
-    income: [
-      { 
-        year: "2022", 
-        revenue: 125000, 
-        grossProfit: 62500, 
-        operatingExpenses: 37500, 
-        ebitda: 25000, 
-        netIncome: 18750,
-        taxRate: 25.0,
-        depreciationPercentPPE: 10.0,
-        totalDebt: 50000,
-        inventory: 18000,
-        capexPercentPPE: 8.0,
-        capexPercentRevenue: 6.4,
-        shareRepurchases: 5000,
-        dividendPercentNI: 25.0,
-        changeInWC: 2000
-      },
-      { 
-        year: "2023", 
-        revenue: 142000, 
-        grossProfit: 72100, 
-        operatingExpenses: 42600, 
-        ebitda: 29500, 
-        netIncome: 22130,
-        taxRate: 25.0,
-        depreciationPercentPPE: 10.0,
-        totalDebt: 55000,
-        inventory: 21000,
-        capexPercentPPE: 8.5,
-        capexPercentRevenue: 7.0,
-        shareRepurchases: 6000,
-        dividendPercentNI: 25.0,
-        changeInWC: 3000
-      },
-      { 
-        year: "2024", 
-        revenue: 165000, 
-        grossProfit: 85800, 
-        operatingExpenses: 49500, 
-        ebitda: 36300, 
-        netIncome: 27225,
-        taxRate: 25.0,
-        depreciationPercentPPE: 10.0,
-        totalDebt: 60000,
-        inventory: 24000,
-        capexPercentPPE: 9.0,
-        capexPercentRevenue: 7.3,
-        shareRepurchases: 7000,
-        dividendPercentNI: 25.0,
-        changeInWC: 4000
-      },
-    ],
-  };
 
   const formatNumber = (num: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -712,142 +809,149 @@ export default function NewProjectWizard() {
                         onClick={() => {
                           setSelectedCompany(null);
                           setSearchQuery("");
+                          setHistoricalData(null);
                           setWizardData({ ...wizardData, companyName: "", ticker: "" });
                         }}
                       >
                         <X className="h-4 w-4" />
-                      </Button>
+                        </Button>
+                      </div>
+                  
+                  {/* Historical Data Preview Table */}
+                  {isLoadingHistorical && (
+                    <div className="mt-4 p-4 text-center text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin inline-block mr-2" />
+                      Loading historical financial data...
+                    </div>
+                  )}
+                  
+                  {historicalData && historicalData.historicals && !isLoadingHistorical && (
+                    <div className="mt-4">
+                      <h3 className="text-sm font-semibold mb-3">Historical Financial Metrics Preview</h3>
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="min-w-[120px]">Metric</TableHead>
+                              {(() => {
+                                const currentYear = new Date().getFullYear();
+                                return [currentYear - 2, currentYear - 1, currentYear].map((year) => (
+                                  <TableHead key={year} className="text-right">{year}</TableHead>
+                                ));
+                              })()}
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            <TableRow>
+                              <TableCell className="font-medium">Revenue Growth</TableCell>
+                              {historicalData.historicals.revenueGrowth.slice(0, 3).map((value, index) => (
+                                <TableCell key={index} className="text-right">
+                                  {(value * 100).toFixed(2)}%
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                            <TableRow>
+                              <TableCell className="font-medium">Gross Margin</TableCell>
+                              {historicalData.historicals.grossMargin.slice(0, 3).map((value, index) => (
+                                <TableCell key={index} className="text-right">
+                                  {(value * 100).toFixed(2)}%
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                            <TableRow>
+                              <TableCell className="font-medium">Operating Margin</TableCell>
+                              {historicalData.historicals.operatingMargin.slice(0, 3).map((value, index) => (
+                                <TableCell key={index} className="text-right">
+                                  {(value * 100).toFixed(2)}%
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                            <TableRow>
+                              <TableCell className="font-medium">Tax Rate</TableCell>
+                              {historicalData.historicals.taxRate.slice(0, 3).map((value, index) => (
+                                <TableCell key={index} className="text-right">
+                                  {(value * 100).toFixed(2)}%
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                            <TableRow>
+                              <TableCell className="font-medium">Depreciation % of PPE</TableCell>
+                              {historicalData.historicals.depreciationPctPPE.slice(0, 3).map((value, index) => (
+                                <TableCell key={index} className="text-right">
+                                  {(value * 100).toFixed(2)}%
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                            <TableRow>
+                              <TableCell className="font-medium">Total Debt</TableCell>
+                              {historicalData.historicals.totalDebt.slice(0, 3).map((value, index) => (
+                                <TableCell key={index} className="text-right">
+                                  {formatNumber(value)}
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                            <TableRow>
+                              <TableCell className="font-medium">Inventory</TableCell>
+                              {historicalData.historicals.inventory.slice(0, 3).map((value, index) => (
+                                <TableCell key={index} className="text-right">
+                                  {formatNumber(value)}
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                            <TableRow>
+                              <TableCell className="font-medium">CAPEX % of PPE</TableCell>
+                              {historicalData.historicals.capexPctPPE.slice(0, 3).map((value, index) => (
+                                <TableCell key={index} className="text-right">
+                                  {(value * 100).toFixed(2)}%
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                            <TableRow>
+                              <TableCell className="font-medium">CAPEX % of Revenue</TableCell>
+                              {historicalData.historicals.capexPctRevenue.slice(0, 3).map((value, index) => (
+                                <TableCell key={index} className="text-right">
+                                  {(value * 100).toFixed(2)}%
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                            <TableRow>
+                              <TableCell className="font-medium">Share Repurchases</TableCell>
+                              {historicalData.historicals.shareRepurchases.slice(0, 3).map((value, index) => (
+                                <TableCell key={index} className="text-right">
+                                  {formatNumber(value)}
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                            <TableRow>
+                              <TableCell className="font-medium">Dividends % of NI</TableCell>
+                              {historicalData.historicals.dividendsPctNI.slice(0, 3).map((value, index) => (
+                                <TableCell key={index} className="text-right">
+                                  {(value * 100).toFixed(2)}%
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                            <TableRow>
+                              <TableCell className="font-medium">Change in Working Capital</TableCell>
+                              {historicalData.historicals.changeInWorkingCapital.slice(0, 3).map((value, index) => (
+                                <TableCell key={index} className="text-right">
+                                  {formatNumber(value)}
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                          </TableBody>
+                        </Table>
                   </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Showing last 3 years. Full historical data will be saved in project JSON.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
               </div>
 
-              <div className="border-t pt-6">
-                {/* Historical Financials Display */}
-                <div className="space-y-4 mb-8">
-                  <h3 className="text-lg font-semibold">Last 3 Years of Financials</h3>
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="bg-denari-2/5">
-                          <TableHead>Field</TableHead>
-                          <TableHead className="text-right">{historicalFinancials.income[0]?.year}</TableHead>
-                          <TableHead className="text-right">{historicalFinancials.income[1]?.year}</TableHead>
-                          <TableHead className="text-right">{historicalFinancials.income[2]?.year}</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        <TableRow>
-                          <TableCell className="font-medium">Revenue Growth</TableCell>
-                          <TableCell className="text-right">-</TableCell>
-                          <TableCell className="text-right">
-                            {historicalFinancials.income[0] && historicalFinancials.income[1]
-                              ? `${(((historicalFinancials.income[1].revenue - historicalFinancials.income[0].revenue) / historicalFinancials.income[0].revenue) * 100).toFixed(1)}%`
-                              : '-'}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {historicalFinancials.income[1] && historicalFinancials.income[2]
-                              ? `${(((historicalFinancials.income[2].revenue - historicalFinancials.income[1].revenue) / historicalFinancials.income[1].revenue) * 100).toFixed(1)}%`
-                              : '-'}
-                          </TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell className="font-medium">Gross Margin</TableCell>
-                          <TableCell className="text-right">
-                            {historicalFinancials.income[0]?.revenue
-                              ? `${((historicalFinancials.income[0].grossProfit / historicalFinancials.income[0].revenue) * 100).toFixed(1)}%`
-                              : '-'}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {historicalFinancials.income[1]?.revenue
-                              ? `${((historicalFinancials.income[1].grossProfit / historicalFinancials.income[1].revenue) * 100).toFixed(1)}%`
-                              : '-'}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {historicalFinancials.income[2]?.revenue
-                              ? `${((historicalFinancials.income[2].grossProfit / historicalFinancials.income[2].revenue) * 100).toFixed(1)}%`
-                              : '-'}
-                          </TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell className="font-medium">Operating Margin</TableCell>
-                          <TableCell className="text-right">
-                            {historicalFinancials.income[0]?.revenue
-                              ? `${(((historicalFinancials.income[0].revenue - historicalFinancials.income[0].operatingExpenses) / historicalFinancials.income[0].revenue) * 100).toFixed(1)}%`
-                              : '-'}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {historicalFinancials.income[1]?.revenue
-                              ? `${(((historicalFinancials.income[1].revenue - historicalFinancials.income[1].operatingExpenses) / historicalFinancials.income[1].revenue) * 100).toFixed(1)}%`
-                              : '-'}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {historicalFinancials.income[2]?.revenue
-                              ? `${(((historicalFinancials.income[2].revenue - historicalFinancials.income[2].operatingExpenses) / historicalFinancials.income[2].revenue) * 100).toFixed(1)}%`
-                              : '-'}
-                          </TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell className="font-medium">Tax Rate</TableCell>
-                          <TableCell className="text-right">{historicalFinancials.income[0]?.taxRate?.toFixed(1) || '-'}%</TableCell>
-                          <TableCell className="text-right">{historicalFinancials.income[1]?.taxRate?.toFixed(1) || '-'}%</TableCell>
-                          <TableCell className="text-right">{historicalFinancials.income[2]?.taxRate?.toFixed(1) || '-'}%</TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell className="font-medium">Depreciation as % of PPE</TableCell>
-                          <TableCell className="text-right">{historicalFinancials.income[0]?.depreciationPercentPPE?.toFixed(1) || '-'}%</TableCell>
-                          <TableCell className="text-right">{historicalFinancials.income[1]?.depreciationPercentPPE?.toFixed(1) || '-'}%</TableCell>
-                          <TableCell className="text-right">{historicalFinancials.income[2]?.depreciationPercentPPE?.toFixed(1) || '-'}%</TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell className="font-medium">Total Debt Amount</TableCell>
-                          <TableCell className="text-right">${formatNumber(historicalFinancials.income[0]?.totalDebt || 0)}</TableCell>
-                          <TableCell className="text-right">${formatNumber(historicalFinancials.income[1]?.totalDebt || 0)}</TableCell>
-                          <TableCell className="text-right">${formatNumber(historicalFinancials.income[2]?.totalDebt || 0)}</TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell className="font-medium">Inventory</TableCell>
-                          <TableCell className="text-right">${formatNumber(historicalFinancials.income[0]?.inventory || 0)}</TableCell>
-                          <TableCell className="text-right">${formatNumber(historicalFinancials.income[1]?.inventory || 0)}</TableCell>
-                          <TableCell className="text-right">${formatNumber(historicalFinancials.income[2]?.inventory || 0)}</TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell className="font-medium">CAPEX % of PPE</TableCell>
-                          <TableCell className="text-right">{historicalFinancials.income[0]?.capexPercentPPE?.toFixed(1) || '-'}%</TableCell>
-                          <TableCell className="text-right">{historicalFinancials.income[1]?.capexPercentPPE?.toFixed(1) || '-'}%</TableCell>
-                          <TableCell className="text-right">{historicalFinancials.income[2]?.capexPercentPPE?.toFixed(1) || '-'}%</TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell className="font-medium">CAPEX % of Revenue</TableCell>
-                          <TableCell className="text-right">{historicalFinancials.income[0]?.capexPercentRevenue?.toFixed(1) || '-'}%</TableCell>
-                          <TableCell className="text-right">{historicalFinancials.income[1]?.capexPercentRevenue?.toFixed(1) || '-'}%</TableCell>
-                          <TableCell className="text-right">{historicalFinancials.income[2]?.capexPercentRevenue?.toFixed(1) || '-'}%</TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell className="font-medium">Share Repurchases</TableCell>
-                          <TableCell className="text-right">${formatNumber(historicalFinancials.income[0]?.shareRepurchases || 0)}</TableCell>
-                          <TableCell className="text-right">${formatNumber(historicalFinancials.income[1]?.shareRepurchases || 0)}</TableCell>
-                          <TableCell className="text-right">${formatNumber(historicalFinancials.income[2]?.shareRepurchases || 0)}</TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell className="font-medium">DIV as % of NI</TableCell>
-                          <TableCell className="text-right">{historicalFinancials.income[0]?.dividendPercentNI?.toFixed(1) || '-'}%</TableCell>
-                          <TableCell className="text-right">{historicalFinancials.income[1]?.dividendPercentNI?.toFixed(1) || '-'}%</TableCell>
-                          <TableCell className="text-right">{historicalFinancials.income[2]?.dividendPercentNI?.toFixed(1) || '-'}%</TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell className="font-medium">Change in WC</TableCell>
-                          <TableCell className="text-right">${formatNumber(historicalFinancials.income[0]?.changeInWC || 0)}</TableCell>
-                          <TableCell className="text-right">${formatNumber(historicalFinancials.income[1]?.changeInWC || 0)}</TableCell>
-                          <TableCell className="text-right">${formatNumber(historicalFinancials.income[2]?.changeInWC || 0)}</TableCell>
-                        </TableRow>
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-
-                {/* Income Statement Inputs */}
-                <div className="space-y-6 mb-8">
+              {/* Income Statement Inputs */}
+              <div className="space-y-6 mb-8">
                   <CardHeader className="p-0">
                     <CardTitle>Income Statement Assumptions</CardTitle>
                   </CardHeader>
@@ -949,13 +1053,14 @@ export default function NewProjectWizard() {
                               <Input
                                 key={year}
                                 type="number"
-                                placeholder={`Y${year + 1}`}
+                                placeholder={`Y${year + 1} - %`}
                                 value={wizardData.grossMarginValues[year]}
                                 onChange={(e) => {
                                   const newValues = [...wizardData.grossMarginValues];
                                   newValues[year] = e.target.value;
                                   setWizardData({ ...wizardData, grossMarginValues: newValues });
                                 }}
+                                onWheel={(e) => e.currentTarget.blur()}
                               />
                             ))}
                     </div>
@@ -1071,6 +1176,63 @@ export default function NewProjectWizard() {
                         )}
                 </div>
                     </div>
+
+                    <div className="space-y-2">
+                      <Label>Interest Rate on Debt</Label>
+                      <div className="flex gap-2">
+                        <Select
+                          value={wizardData.interestRateOnDebtMethod}
+                          onValueChange={(value) => setWizardData({ ...wizardData, interestRateOnDebtMethod: value as "stable" | "step" | "manual" })}
+                        >
+                          <SelectTrigger className="w-32">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="stable">Stable</SelectItem>
+                            <SelectItem value="step">Step Change</SelectItem>
+                            <SelectItem value="manual">Manual</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {wizardData.interestRateOnDebtMethod === "stable" && (
+                          <Input
+                            type="number"
+                            placeholder="%"
+                            value={wizardData.interestRateOnDebtStableValue}
+                            onChange={(e) => setWizardData({ ...wizardData, interestRateOnDebtStableValue: e.target.value })}
+                            onWheel={(e) => e.currentTarget.blur()}
+                            className="flex-1"
+                          />
+                        )}
+                        {wizardData.interestRateOnDebtMethod === "step" && (
+                          <Input
+                            type="number"
+                            placeholder="Step rate %"
+                            value={wizardData.interestRateOnDebtStepValue}
+                            onChange={(e) => setWizardData({ ...wizardData, interestRateOnDebtStepValue: e.target.value })}
+                            onWheel={(e) => e.currentTarget.blur()}
+                            className="flex-1"
+                          />
+                        )}
+                        {wizardData.interestRateOnDebtMethod === "manual" && (
+                          <div className="flex gap-2 flex-1">
+                            {[0, 1, 2, 3, 4].map((year) => (
+                              <Input
+                                key={year}
+                                type="number"
+                                placeholder={`Y${year + 1} - %`}
+                                value={wizardData.interestRateOnDebtValues[year]}
+                                onChange={(e) => {
+                                  const newValues = [...wizardData.interestRateOnDebtValues];
+                                  newValues[year] = e.target.value;
+                                  setWizardData({ ...wizardData, interestRateOnDebtValues: newValues });
+                                }}
+                                onWheel={(e) => e.currentTarget.blur()}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1135,60 +1297,6 @@ export default function NewProjectWizard() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label>Total Debt Amount</Label>
-                      <div className="flex gap-2">
-                        <Select
-                          value={wizardData.totalDebtMethod}
-                          onValueChange={(value) => setWizardData({ ...wizardData, totalDebtMethod: value as "stable" | "step" | "custom" })}
-                        >
-                          <SelectTrigger className="w-32">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="stable">Stable</SelectItem>
-                            <SelectItem value="step">Step Change</SelectItem>
-                            <SelectItem value="custom">Custom</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        {wizardData.totalDebtMethod === "stable" && (
-                          <Input
-                            type="number"
-                            placeholder="Value"
-                            value={wizardData.totalDebtStableValue}
-                            onChange={(e) => setWizardData({ ...wizardData, totalDebtStableValue: e.target.value })}
-                            className="flex-1"
-                          />
-                        )}
-                        {wizardData.totalDebtMethod === "step" && (
-                          <Input
-                            type="number"
-                            placeholder="Step rate %"
-                            value={wizardData.totalDebtStepValue}
-                            onChange={(e) => setWizardData({ ...wizardData, totalDebtStepValue: e.target.value })}
-                            className="flex-1"
-                          />
-                        )}
-                        {wizardData.totalDebtMethod === "custom" && (
-                          <div className="flex gap-2 flex-1">
-                            {[0, 1, 2, 3, 4].map((year) => (
-                              <Input
-                                key={year}
-                                type="number"
-                                placeholder={`Y${year + 1}`}
-                                value={wizardData.totalDebtValues[year]}
-                                onChange={(e) => {
-                                  const newValues = [...wizardData.totalDebtValues];
-                                  newValues[year] = e.target.value;
-                                  setWizardData({ ...wizardData, totalDebtValues: newValues });
-                                }}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
                       <Label>Inventory (% of Sales)</Label>
                       <div className="flex gap-2">
                         <Select
@@ -1243,7 +1351,7 @@ export default function NewProjectWizard() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label>% Change in Total Debt (increase/decrease)</Label>
+                      <Label>Long Term Debt Change</Label>
                       <div className="flex gap-2">
                         <Select
                           value={wizardData.debtChangeMethod}
@@ -1332,61 +1440,7 @@ export default function NewProjectWizard() {
                             }}
                             className="flex-1"
                           />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Change in WC</Label>
-                      <div className="flex gap-2">
-                        <Select
-                          value={wizardData.changeInWCMethod}
-                          onValueChange={(value) => setWizardData({ ...wizardData, changeInWCMethod: value as "stable" | "step" | "manual" })}
-                        >
-                          <SelectTrigger className="w-32">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="stable">Stable</SelectItem>
-                            <SelectItem value="step">Step Change</SelectItem>
-                            <SelectItem value="manual">Manual</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        {wizardData.changeInWCMethod === "stable" && (
-                          <Input
-                            type="number"
-                            placeholder="%"
-                            value={wizardData.changeInWCStableValue}
-                            onChange={(e) => setWizardData({ ...wizardData, changeInWCStableValue: e.target.value })}
-                            className="flex-1"
-                          />
-                        )}
-                        {wizardData.changeInWCMethod === "step" && (
-                          <Input
-                            type="number"
-                            placeholder="Step rate %"
-                            value={wizardData.changeInWCStepValue}
-                            onChange={(e) => setWizardData({ ...wizardData, changeInWCStepValue: e.target.value })}
-                            className="flex-1"
-                          />
-                        )}
-                        {wizardData.changeInWCMethod === "manual" && (
-                          <div className="flex gap-2 flex-1">
-                            {[0, 1, 2, 3, 4].map((year) => (
-                              <Input
-                                key={year}
-                                type="number"
-                                placeholder={`Y${year + 1}`}
-                                value={wizardData.changeInWCValues[year]}
-                                onChange={(e) => {
-                                  const newValues = [...wizardData.changeInWCValues];
-                                  newValues[year] = e.target.value;
-                                  setWizardData({ ...wizardData, changeInWCValues: newValues });
-                                }}
-                              />
-                            ))}
-                          </div>
-                        )}
+                            </div>
                       </div>
                     </div>
 
@@ -1406,7 +1460,7 @@ export default function NewProjectWizard() {
                           }}
                           className="flex-1"
                         />
-                      </div>
+                </div>
                     </div>
 
                     <div className="space-y-2">
@@ -1421,17 +1475,6 @@ export default function NewProjectWizard() {
                       />
                     </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="deferredTax">Deferred Tax Expense (% of Tax)</Label>
-                      <Input
-                        id="deferredTax"
-                        type="number"
-                        placeholder="% of tax"
-                        value={wizardData.deferredTaxPercent}
-                        onChange={(e) => setWizardData({ ...wizardData, deferredTaxPercent: e.target.value })}
-                        onWheel={(e) => e.currentTarget.blur()}
-                      />
-                    </div>
                   </div>
                 </div>
 
@@ -1444,7 +1487,7 @@ export default function NewProjectWizard() {
                     {/* Base Assumptions */}
                     <div className="space-y-4 pt-4 border-t">
                       <h4 className="font-semibold text-lg">Base Assumptions</h4>
-                      <div className="space-y-2">
+                    <div className="space-y-2">
                         <Label>Beta</Label>
                       <div className="flex gap-2">
                         <div className="space-y-2 flex-1">
@@ -1503,8 +1546,8 @@ export default function NewProjectWizard() {
 
                       {wizardData.betaMethod === "manual" && (
                         <div className="space-y-2">
-                          <Input
-                            type="number"
+                      <Input
+                        type="number"
                             placeholder="e.g., 1.2"
                             value={wizardData.beta}
                             onChange={(e) => setWizardData({ ...wizardData, beta: e.target.value })}
@@ -1515,7 +1558,7 @@ export default function NewProjectWizard() {
                               Reference: {wizardData.betaReference}
                             </Badge>
                           )}
-                        </div>
+                    </div>
                       )}
 
                       {wizardData.betaMethod === "calculate" && wizardData.betaCalculated && (
@@ -1551,7 +1594,7 @@ export default function NewProjectWizard() {
                         onWheel={(e) => e.currentTarget.blur()}
                       />
                       <p className="text-xs text-muted-foreground">Will be autopopulated via API when available</p>
-                    </div>
+                  </div>
 
                     <div className="space-y-2">
                       <Label htmlFor="tgr">Terminal Growth Rate</Label>
@@ -1563,7 +1606,7 @@ export default function NewProjectWizard() {
                         onChange={(e) => setWizardData({ ...wizardData, terminalGrowthRate: e.target.value })}
                         onWheel={(e) => e.currentTarget.blur()}
                       />
-                    </div>
+                </div>
                     </div>
 
                     <div className="space-y-4">
@@ -1625,7 +1668,7 @@ export default function NewProjectWizard() {
                             </div>
                           </div>
 
-                          <div className="space-y-2">
+                  <div className="space-y-2">
                             <Label>Gross Margin</Label>
                             <div className="flex gap-2">
                               <Select
@@ -1674,7 +1717,7 @@ export default function NewProjectWizard() {
                                       }}
                                     />
                                   ))}
-                                </div>
+                          </div>
                               )}
                             </div>
                           </div>
@@ -1727,10 +1770,10 @@ export default function NewProjectWizard() {
                                         setWizardData({ ...wizardData, bearOperatingMarginValues: newValues });
                                       }}
                                     />
-                                  ))}
-                                </div>
+                    ))}
+                  </div>
                               )}
-                            </div>
+                </div>
                           </div>
 
                           <div className="space-y-2">
@@ -1788,13 +1831,14 @@ export default function NewProjectWizard() {
                   </div>
 
                     <div className="space-y-2">
-                            <Label htmlFor="depreciation-bear-scenario">Depreciation as % of PPE</Label>
+                            <Label htmlFor="depreciation-bear-scenario">Depreciation as % of Revenue</Label>
                             <Input
                               id="depreciation-bear-scenario"
                               type="number"
                               placeholder="e.g., 10"
                               value={wizardData.bearDepreciationPercentPPE}
                               onChange={(e) => setWizardData({ ...wizardData, bearDepreciationPercentPPE: e.target.value })}
+                              onWheel={(e) => e.currentTarget.blur()}
                             />
                           </div>
 
@@ -1827,7 +1871,7 @@ export default function NewProjectWizard() {
                                 />
                               </div>
                             </div>
-                          </div>
+                  </div>
 
                     <div className="space-y-2">
                             <Label>Change in WC</Label>
@@ -1884,8 +1928,8 @@ export default function NewProjectWizard() {
                           </div>
 
                           {/* Base Assumptions for Bear Scenario */}
-                          <div className="space-y-4">
-                            <div className="space-y-2">
+                  <div className="space-y-4">
+                    <div className="space-y-2">
                               <Label>Beta</Label>
                               <div className="flex gap-2">
                                 <div className="space-y-2 flex-1">
@@ -1944,8 +1988,8 @@ export default function NewProjectWizard() {
 
                               {wizardData.betaMethod === "manual" && (
                                 <div className="space-y-2">
-                                  <Input
-                                    type="number"
+                      <Input
+                        type="number"
                                     placeholder="e.g., 1.2"
                                     value={wizardData.beta}
                                     onChange={(e) => setWizardData({ ...wizardData, beta: e.target.value })}
@@ -1965,9 +2009,9 @@ export default function NewProjectWizard() {
                               )}
                               
                               <p className="text-xs text-muted-foreground">Reference value will be calculated from API if available</p>
-                            </div>
+                    </div>
 
-                            <div className="space-y-2">
+                    <div className="space-y-2">
                               <Label htmlFor="mrp-bear">Market Risk Premium</Label>
                               <Input
                                 id="mrp-bear"
@@ -2057,7 +2101,7 @@ export default function NewProjectWizard() {
                                       }}
                                     />
                                   ))}
-                                </div>
+                            </div>
                               )}
                             </div>
                           </div>
@@ -2110,11 +2154,11 @@ export default function NewProjectWizard() {
                                         setWizardData({ ...wizardData, bullGrossMarginValues: newValues });
                                       }}
                                     />
-                                  ))}
-                          </div>
+                          ))}
+                        </div>
                               )}
                             </div>
-                          </div>
+                    </div>
 
                           <div className="space-y-2">
                             <Label>Operating Margin</Label>
@@ -2165,7 +2209,7 @@ export default function NewProjectWizard() {
                                       }}
                                     />
                                   ))}
-                                </div>
+                          </div>
                               )}
                             </div>
                           </div>
@@ -2218,20 +2262,21 @@ export default function NewProjectWizard() {
                                         setWizardData({ ...wizardData, bullTaxRateValues: newValues });
                                       }}
                                     />
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
 
                           <div className="space-y-2">
-                            <Label htmlFor="depreciation-bull-scenario">Depreciation as % of PPE</Label>
+                            <Label htmlFor="depreciation-bull-scenario">Depreciation as % of Revenue</Label>
                             <Input
                               id="depreciation-bull-scenario"
                               type="number"
                               placeholder="e.g., 10"
                               value={wizardData.bullDepreciationPercentPPE}
                               onChange={(e) => setWizardData({ ...wizardData, bullDepreciationPercentPPE: e.target.value })}
+                              onWheel={(e) => e.currentTarget.blur()}
                             />
                           </div>
 
@@ -2321,7 +2366,7 @@ export default function NewProjectWizard() {
                           </div>
 
                           {/* Base Assumptions for Bull Scenario */}
-                          <div className="space-y-4">
+                  <div className="space-y-4">
                             <div className="space-y-2">
                               <Label>Beta</Label>
                               <div className="flex gap-2">
@@ -2339,7 +2384,7 @@ export default function NewProjectWizard() {
                                       <SelectItem value="manual">Manual</SelectItem>
                                     </SelectContent>
                                   </Select>
-                                </div>
+                    </div>
 
                                 <div className="space-y-2 flex-1">
                                   <Label>Years</Label>
@@ -2357,7 +2402,7 @@ export default function NewProjectWizard() {
                                       <SelectItem value="5">5</SelectItem>
                                     </SelectContent>
                                   </Select>
-                                </div>
+                    </div>
 
                                 <div className="space-y-2 flex-1">
                                   <Label>Benchmark</Label>
@@ -2376,7 +2421,7 @@ export default function NewProjectWizard() {
                                       <SelectItem value="Dow Jones">Dow Jones</SelectItem>
                                     </SelectContent>
                                   </Select>
-                                </div>
+                  </div>
                               </div>
 
                               {wizardData.betaMethod === "manual" && (
@@ -2392,8 +2437,8 @@ export default function NewProjectWizard() {
                                       Reference: {wizardData.betaReference}
                                     </Badge>
                                   )}
-                                </div>
-                              )}
+                </div>
+              )}
 
                               {wizardData.betaMethod === "calculate" && wizardData.betaCalculated && (
                                 <div className="px-3 py-2 bg-muted rounded-md border border-input text-sm">
@@ -2572,19 +2617,33 @@ export default function NewProjectWizard() {
                         </div>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        For each competitor, we will pull or compute: Market Cap, Revenue, EBITDA, Earnings, EV, Price/Sales, P/E, EV/EBITDA, EV/Revenue
+                        Please select exactly 4 competitors. For each competitor, we will pull or compute: Market Cap, Revenue, EBITDA, Earnings, EV, Price/Sales, P/E, EV/EBITDA, EV/Revenue
                       </p>
+                      {wizardData.competitors.length > 0 && (
+                        <p className={`text-xs ${wizardData.competitors.length === 4 ? 'text-green-600' : 'text-orange-600'}`}>
+                          {wizardData.competitors.length} of 4 competitors selected
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 {/* Generate Button */}
                 <div className="flex justify-end pt-6 border-t">
-                  <Button onClick={handleFinish} className="bg-primary hover:bg-primary/90" size="lg">
+                  <Button 
+                    onClick={handleFinish} 
+                    className="bg-primary hover:bg-primary/90" 
+                    size="lg"
+                    disabled={!wizardData.competitors || wizardData.competitors.length !== 4}
+                  >
                     Generate Valuation
                   </Button>
                 </div>
-              </div>
+                {wizardData.competitors && wizardData.competitors.length !== 4 && (
+                  <p className="text-sm text-orange-600 text-right mt-2">
+                    Please select exactly 4 competitors to continue
+                  </p>
+                )}
             </CardContent>
           </Card>
         </div>

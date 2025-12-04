@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.logging import configure_logging
-from app.api.v1 import companies, filings, financials, models, branding, screener, treasury
+from app.api.v1 import companies, filings, financials, models, branding, screener, treasury, historical
 
 # -----------------------------------------------------------------------------
 # App Initialization
@@ -53,6 +53,7 @@ app.include_router(branding.router, prefix="/api/v1")
 app.include_router(screener.router, prefix="/api/v1")
 app.include_router(screener.screener_router, prefix="/api/v1")
 app.include_router(treasury.router, prefix="/api/v1")
+app.include_router(historical.router, prefix="/api/v1")
 
 # -----------------------------------------------------------------------------
 # Health Check

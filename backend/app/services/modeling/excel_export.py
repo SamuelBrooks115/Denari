@@ -211,6 +211,11 @@ def load_structured_json(path: str) -> Dict[str, Any]:
     # Normalize CAPEX and Share Repurchases values to be negative
     data = _normalize_capex_and_share_repurchases(data)
     
+    # Remove historical data if present - Excel export should use ONLY user-entered values
+    # Historical data is for context only, not for Excel calculations
+    if "historicals" in data:
+        del data["historicals"]
+    
     return data
 
 
