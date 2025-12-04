@@ -3,48 +3,31 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Calendar } from "lucide-react";
 
 const articles: Record<string, { title: string; date: string; body: string }> = {
-  "denari-series-a": {
-    title: "Denari Raises $15M Series A to Accelerate Product Development",
+  "product-progress-update": {
+    title: "Product Progress Update",
     date: "October 15, 2025",
-    body: `We're thrilled to announce that Denari has raised $15 million in Series A funding led by premier venture capital firms. This investment represents a major milestone in our journey to transform financial modeling for investment professionals.
+    body: `The past few weeks have been a whirlwind of late-night coding sessions, early morning standups, and countless cups of coffee as our team works tirelessly to deliver an MVP for Hunter Sandidge. The energy in the office (and virtual workspaces) has been electric, with team members staying up well past midnight to ensure every feature meets our high standards.
 
-The funding will be used to accelerate product development, expand our engineering team, and enhance our platform's capabilities. We're committed to building the most powerful and intuitive financial modeling tools available.
+Working closely with Hunter Sandidge has been an incredible experience. His vision and feedback have pushed us to think differently about how financial modeling tools should work. The iterative process of building, testing, and refining has taught us invaluable lessons about product development and user-centric design.
 
-Our investors share our vision of democratizing professional-grade valuation tools. With their support, we'll continue to innovate and deliver features that make investment professionals more efficient and effective.
+Despite the long hours, the team's morale remains high. There's something special about being part of a startup that's genuinely passionate about solving real problems. Every bug fix, every new feature, every breakthrough moment brings us closer to delivering something we're truly proud of.
 
-Thank you to our users, team members, and investors for believing in our mission. This is just the beginning.`,
+We're making significant progress on core features including the DCF modeling capabilities, industry screener functionality, and the intuitive project creation workflow. The MVP is taking shape, and we can't wait to share it with Hunter and the broader community.
+
+The journey of building an MVP is never easy, but it's moments like these—when the team comes together, pushes through challenges, and creates something meaningful—that remind us why we started Denari in the first place.`,
   },
-  "new-dcf-features": {
-    title: "Introducing Advanced DCF Sensitivity Analysis",
+  "networking-ideas-gala": {
+    title: "Networking at Ideas Gala",
     date: "September 28, 2025",
-    body: `We're excited to launch our most requested feature: advanced sensitivity analysis for DCF valuations. This new capability allows you to quickly understand how changes in key assumptions impact your valuation results.
+    body: `Last week, our team had the incredible opportunity to attend the Ideas Gala, an annual networking event that brings together entrepreneurs, investors, and innovators from across the tech and finance industries. It was an evening filled with meaningful conversations, new connections, and exciting opportunities to showcase Denari.
 
-Key features include:
-- Multi-variable sensitivity tables
-- Tornado diagrams for identifying critical assumptions
-- Scenario analysis with custom parameter ranges
-- Visual representations of valuation ranges
+The event provided the perfect platform to introduce our product to potential users and partners. We had numerous engaging discussions with investment professionals who were genuinely interested in how Denari could streamline their valuation workflows. The feedback was overwhelmingly positive, with many expressing excitement about our approach to making financial modeling more accessible and intuitive.
 
-Our sensitivity tools are designed to integrate seamlessly with your existing DCF models. Simply select your key assumptions, define ranges, and Denari generates comprehensive analysis automatically.
+One of the highlights of the evening was connecting with several early-stage investors who were intrigued by our vision. We shared our journey, discussed the challenges we've overcome, and outlined our roadmap for the future. These conversations reinforced our belief that we're building something that addresses a real need in the market.
 
-This feature is available now for all Venus plan subscribers and will be rolling out to Roma users in the coming weeks.`,
-  },
-  "enterprise-launch": {
-    title: "Denari Enterprise: Built for Large Organizations",
-    date: "August 12, 2025",
-    body: `Today we're launching Denari Enterprise, a comprehensive solution designed specifically for large financial institutions and investment firms.
+Beyond the business opportunities, the Ideas Gala was a chance to learn from other founders and entrepreneurs. Hearing their stories of perseverance, innovation, and growth was both inspiring and humbling. It reminded us that we're part of a larger community of builders who are passionate about creating solutions that make a difference.
 
-Denari Enterprise includes:
-- Advanced security and compliance features
-- Single sign-on (SSO) integration
-- Centralized user and team management
-- Custom approval workflows
-- Dedicated support and training
-- On-premises deployment options
-
-Large organizations have unique requirements around security, governance, and collaboration. Denari Enterprise addresses these needs while maintaining the ease of use that makes Denari so powerful.
-
-To learn more about Denari Enterprise, contact our sales team for a personalized demo.`,
+We left the event with a stack of business cards, several follow-up meetings scheduled, and a renewed sense of excitement about the path ahead. Networking events like the Ideas Gala are crucial for startups—they're where relationships are built, partnerships are formed, and opportunities are discovered. We're grateful for the experience and look forward to continuing these conversations as we grow.`,
   },
 };
 

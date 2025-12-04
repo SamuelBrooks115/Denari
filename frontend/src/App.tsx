@@ -39,7 +39,8 @@ import ModelPage from "./pages/app/ModelPage";
 import PreferencesIndex from "./pages/app/preferences/Index";
 
 import NotFound from "./pages/NotFound";
-import IndustryScreener from "./pages/IndustryScreener";
+import IndustryScreenerIndex from "./pages/industry-screener/index";
+import IndustryScreenerSearch from "./pages/industry-screener/search";
 
 const queryClient = new QueryClient();
 
@@ -53,7 +54,8 @@ const App = () => (
           <Route path="/" element={<><Navbar /><Landing /><Footer /></>} />
           <Route path="/valuation" element={<><Navbar /><Valuation /><Footer /></>} />
           <Route path="/industry" element={<><Navbar /><IndustryOverview /><Footer /></>} />
-          <Route path="/industry-screener" element={<><Navbar /><IndustryScreener /><Footer /></>} />
+          <Route path="/industry-screener" element={<><Navbar /><IndustryScreenerIndex /><Footer /></>} />
+          <Route path="/industry-screener/search" element={<><Navbar /><IndustryScreenerSearch /><Footer /></>} />
           <Route path="/three-statement" element={<><Navbar /><ThreeStatement /><Footer /></>} />
           <Route path="/relative-valuation" element={<><Navbar /><RelativeValuation /><Footer /></>} />
           <Route path="/dcf" element={<><Navbar /><DCF /><Footer /></>} />

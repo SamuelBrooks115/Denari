@@ -22,6 +22,7 @@ from app.data.fmp_client import (
     fetch_available_industries,
     fetch_company_screener,
     fetch_available_tickers,
+    fetch_company_profile,
 )
 
 logger = get_logger(__name__)
@@ -64,6 +65,7 @@ class CompanyResult(BaseModel):
     description: Optional[str] = None
     ceo: Optional[str] = None
     employees: Optional[int] = None
+    price: Optional[float] = None  # Stock price if available from FMP
 
 
 class ScreenerResponse(BaseModel):
@@ -126,12 +128,18 @@ async def get_sectors():
 
 
 @router.get("/industries", response_model=List[str])
-async def get_industries():
+async def get_industries(
+    sector: Optional[str] = Query(None, description="Filter industries by sector (e.g., 'Technology')")
+):
     """
     GET /meta/industries
     
     Retrieve list of available industries from FMP.
+    If sector is provided, returns only industries for that sector.
     
+    Query Parameters:
+        sector (optional): Filter industries by sector name
+        
     Returns:
         JSON array of industry name strings
         
@@ -139,9 +147,37 @@ async def get_industries():
         500: If FMP API call fails
     """
     try:
-        logger.info("Fetching available industries")
-        industries = fetch_available_industries()
-        return industries
+        if sector:
+            logger.info(f"Fetching industries for sector: {sector}")
+            # Fetch industries filtered by sector by querying the screener
+            # This ensures we only get industries that actually exist for this sector
+            companies = fetch_company_screener(
+                sector=sector.strip() if sector else None,
+                industry=None,
+                market_cap_min=None,
+                market_cap_max=None,
+                limit=200,  # Max limit to get good coverage
+                page=0,
+            )
+            
+            # Extract unique industries from the results
+            industries_set = set()
+            for company in companies:
+                industry = (
+                    company.get("industry") or 
+                    company.get("Industry") or 
+                    company.get("industryName")
+                )
+                if industry and str(industry).strip():
+                    industries_set.add(str(industry).strip())
+            
+            industries = sorted(list(industries_set))
+            logger.info(f"Found {len(industries)} unique industries for sector '{sector}'")
+            return industries
+        else:
+            logger.info("Fetching all available industries")
+            industries = fetch_available_industries()
+            return industries
     except Exception as e:
         logger.error(f"Error fetching industries: {e}")
         raise HTTPException(
@@ -251,6 +287,7 @@ async def get_industry_screener(
             description = company.get("description") or company.get("Description") or company.get("about") or None
             ceo = company.get("ceo") or company.get("CEO") or company.get("ceoName") or None
             employees = company.get("fullTimeEmployees") or company.get("employees") or company.get("Employees") or company.get("full_time_employees") or None
+            price = company.get("price") or company.get("Price") or company.get("currentPrice") or company.get("current_price") or None
             
             # Convert market cap to int if it's a float or string
             if isinstance(market_cap, float):
@@ -271,6 +308,17 @@ async def get_industry_screener(
                     except (ValueError, TypeError):
                         employees = None
             
+            # Convert price to float if it's a string
+            price_val = None
+            if price is not None:
+                if isinstance(price, (int, float)):
+                    price_val = float(price)
+                elif isinstance(price, str):
+                    try:
+                        price_val = float(price)
+                    except (ValueError, TypeError):
+                        price_val = None
+            
             results.append(CompanyResult(
                 symbol=symbol,
                 name=name,
@@ -282,6 +330,7 @@ async def get_industry_screener(
                 description=description,
                 ceo=ceo,
                 employees=employees,
+                price=price_val,
             ))
         
         return ScreenerResponse(
@@ -301,5 +350,59 @@ async def get_industry_screener(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to fetch screener results: {str(e)}"
+        )
+
+
+@screener_router.get("/company-profile/{symbol}", response_model=Dict[str, Any])
+async def get_company_profile(symbol: str):
+    """
+    GET /industry-screener/company-profile/{symbol}
+    
+    Fetch detailed company profile including description from FMP.
+    
+    Path Parameters:
+        symbol: Stock ticker symbol (e.g., "AAPL", "F")
+        
+    Returns:
+        Company profile dictionary with all fields from FMP profile endpoint,
+        including description, website, logo, CEO, employees, etc.
+        
+    Raises:
+        404: If company profile not found
+        500: If FMP API call fails
+    """
+    try:
+        normalized_symbol = symbol.upper().strip()
+        logger.info(f"Fetching company profile for {normalized_symbol}")
+        
+        profile = fetch_company_profile(normalized_symbol)
+        
+        # Extract description from various possible field names
+        description = (
+            profile.get("description") or 
+            profile.get("Description") or 
+            profile.get("about") or 
+            profile.get("About") or
+            None
+        )
+        
+        # Return profile with normalized description field
+        result = dict(profile)
+        if description:
+            result["description"] = description
+        
+        return result
+        
+    except RuntimeError as e:
+        logger.error(f"Error fetching company profile for {symbol}: {e}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Company profile not found for symbol: {symbol}"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error fetching company profile for {symbol}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch company profile: {str(e)}"
         )
 

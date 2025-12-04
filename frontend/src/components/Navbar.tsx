@@ -43,7 +43,7 @@ export const Navbar = () => {
             </Link>
             {isLoggedIn && (
               <Link
-                to="/app/model"
+                to="/app/projects"
                 className="text-sm font-medium text-denari-4 hover:text-primary transition-colors"
               >
                 Model
@@ -56,10 +56,10 @@ export const Navbar = () => {
               Solutions
             </Link>
             <Link
-              to="/industry"
+              to="/industry-screener"
               className="text-sm font-medium text-denari-4 hover:text-primary transition-colors"
             >
-              Coming Soon
+              Industry Screener
             </Link>
             <Link
               to="/about"

@@ -5,25 +5,18 @@ import { Newspaper } from "lucide-react";
 
 const newsArticles = [
   {
-    slug: "denari-series-a",
-    title: "Denari Raises $15M Series A to Accelerate Product Development",
+    slug: "product-progress-update",
+    title: "Product Progress Update",
     date: "October 15, 2025",
     excerpt:
-      "We're excited to announce our Series A funding round led by premier venture capital firms. This investment will fuel product innovation and team expansion.",
+      "Late nights and early mornings have become the norm as our team pushes forward to deliver an MVP for Hunter Sandidge. The dedication and passion driving this project is truly inspiring.",
   },
   {
-    slug: "new-dcf-features",
-    title: "Introducing Advanced DCF Sensitivity Analysis",
+    slug: "networking-ideas-gala",
+    title: "Networking at Ideas Gala",
     date: "September 28, 2025",
     excerpt:
-      "Our latest release includes powerful new sensitivity analysis tools that help you understand the impact of key assumptions on your valuations.",
-  },
-  {
-    slug: "enterprise-launch",
-    title: "Denari Enterprise: Built for Large Organizations",
-    date: "August 12, 2025",
-    excerpt:
-      "We're launching Denari Enterprise with advanced security, governance, and collaboration features designed for institutional investors.",
+      "Our team had an incredible opportunity to connect with industry leaders and potential partners at the Ideas Gala, showcasing our product and building valuable relationships.",
   },
 ];
 
@@ -48,13 +41,14 @@ export default function News() {
 
       <div className="container mx-auto px-4 py-16">
         <div className="max-w-5xl mx-auto">
-          <div className="grid md:grid-cols-3 gap-6 mb-8">
+          <div className="flex flex-wrap justify-center gap-6 mb-8">
             {newsArticles.map((article) => (
-              <NewsCard
-                key={article.slug}
-                {...article}
-                onClick={() => navigate(`/about/news/${article.slug}`)}
-              />
+              <div key={article.slug} className="w-full md:w-[calc(50%-12px)] max-w-md">
+                <NewsCard
+                  {...article}
+                  onClick={() => navigate(`/about/news/${article.slug}`)}
+                />
+              </div>
             ))}
           </div>
 

@@ -11,7 +11,6 @@ This module is unit-testable without Excel and uses structured dataclass outputs
 """
 
 from typing import Dict, Any, List, Optional
-from datetime import datetime
 
 from app.services.modeling.types import (
     CompanyModelInput,

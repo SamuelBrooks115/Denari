@@ -141,7 +141,6 @@ class Settings(BaseSettings):
         description="Maximum retry attempts for LLM API calls",
     )
 
-<<<<<<< HEAD
     # Financial Modeling Prep API - For company profile data
     FMP_API_KEY: str = Field(
         "",
@@ -155,12 +154,8 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return v.strip()
         return v or ""
-=======
-    # Database Configuration (Supabase)
-    SUPABASE_DB_URL: str = Field(
-        "",
-        description="PostgreSQL connection URL for Supabase database",
-    )
+
+    # Supabase Configuration
     SUPABASE_URL: str = Field(
         "",
         description="Supabase project URL",
@@ -169,13 +164,6 @@ class Settings(BaseSettings):
         "",
         description="Supabase service role key for admin access",
     )
-
-    # S&P 500 Ticker Source
-    SP500_TICKER_SOURCE: str = Field(
-        "",
-        description="Path or URL to S&P 500 ticker list (CSV or JSON)",
-    )
->>>>>>> 0251f9db5f18529bdb0bfc587a03702c55279b35
 
     model_config = SettingsConfigDict(
         env_file=_ENV_FILE_PATH,

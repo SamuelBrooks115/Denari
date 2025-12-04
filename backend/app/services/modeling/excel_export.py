@@ -27,7 +27,10 @@ This module does NOT:
 - Fetch filings or prices.
 """
 
+from io import BytesIO
+from sqlalchemy.orm import Session
 from __future__ import annotations
+from typing import Optional, Dict, Any, Union
 
 from collections import defaultdict
 from datetime import datetime
@@ -48,10 +51,6 @@ from app.services.modeling.types import (
     build_company_model_input,
     HistoricalSeries,
     DcfOutput,
-)
-from app.services.modeling.excel_dcf_scenarios import (
-    build_scenario_formula_dict,
-    apply_scenario_to_sheet,
 )
 
 # Use openpyxl for reading/modifying existing Excel files
@@ -84,13 +83,12 @@ ROW_LABEL_TO_MODEL_ROLE: Dict[str, str] = {
     "net sales": "IS_REVENUE",
     "total revenue": "IS_REVENUE",
     
-    # COGS - match patterns with parentheses and dashes first, and more specific patterns first
+    # COGS - match patterns with parentheses and dashes first
     "(-) cogs": "IS_COGS",
-    "cost of revenue": "IS_COGS",  # Must come before "revenue" to avoid false match
+    "cogs": "IS_COGS",
     "cost of goods sold": "IS_COGS",
     "cost of goods": "IS_COGS",
     "cost of sales": "IS_COGS",
-    "cogs": "IS_COGS",
     
     # Gross Profit
     "gross profit": "IS_GROSS_PROFIT",
@@ -208,401 +206,17 @@ def load_structured_json(path: str) -> Dict[str, Any]:
     # Check if it's an array format (like F_income_statement_stable_raw.json)
     if isinstance(data, list) and len(data) > 0:
         # Transform array format to standard format
-        return _transform_array_format_to_standard(data)
+        data = _transform_array_format_to_standard(data)
+    
+    # Normalize CAPEX and Share Repurchases values to be negative
+    data = _normalize_capex_and_share_repurchases(data)
+    
+    # Remove historical data if present - Excel export should use ONLY user-entered values
+    # Historical data is for context only, not for Excel calculations
+    if "historicals" in data:
+        del data["historicals"]
     
     return data
-
-
-def convert_assumptions_to_legacy_format(assumptions: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Convert new assumptions format to legacy format for compatibility.
-    
-    New format (project JSON):
-    {
-        "projectId": "...",
-        "incomeStatement": {
-            "revenue": {"method": "step", "stepValue": "1"},
-            "grossMargin": {"method": "stable", "stableValue": "0.4"},
-            ...
-        },
-        "balanceSheet": {...},
-        "cashFlow": {...},
-        "relativeValuation": {"competitors": [...]}
-    }
-    
-    Legacy format:
-    {
-        "assumptions": {
-            "revenue": {"type": "step", "values": [0.05, 0.06, ...]},
-            ...
-        },
-        "balance_sheet": {...},
-        "cash_flow": {...},
-        "competitors": [...]
-    }
-    
-    Args:
-        assumptions: Assumptions dictionary in either format
-        
-    Returns:
-        Assumptions dictionary in legacy format
-    """
-    # Check if it's already in legacy format
-    if "assumptions" in assumptions or ("competitors" in assumptions and "projectId" not in assumptions):
-        # Already in legacy format, but extract DCF assumptions to top level if present
-        if "dcf" in assumptions:
-            dcf_data = assumptions["dcf"]
-            # Extract DCF assumptions to top level for populate_wacc_and_assumptions
-            if "market_risk_premium" in dcf_data:
-                assumptions["market_risk_premium"] = dcf_data["market_risk_premium"]
-            if "risk_free_rate" in dcf_data:
-                assumptions["risk_free_rate"] = dcf_data["risk_free_rate"]
-            if "cost_of_debt" in dcf_data:
-                assumptions["cost_of_debt"] = dcf_data["cost_of_debt"]
-            if "tax_rate" in dcf_data:
-                assumptions["tax_rate"] = dcf_data["tax_rate"]
-        return assumptions
-    
-    # Check if it's new format
-    if "projectId" in assumptions or "incomeStatement" in assumptions:
-        logger.info("Converting new assumptions format to legacy format")
-        legacy = {}
-        
-        # Convert competitors
-        if "relativeValuation" in assumptions:
-            legacy["competitors"] = assumptions["relativeValuation"].get("competitors", [])
-        elif "competitors" in assumptions:
-            legacy["competitors"] = assumptions["competitors"]
-        
-        # Helper function to convert a single assumption value
-        def convert_assumption_value(assumption_obj: Any, forecast_periods: int = 5) -> Dict[str, Any]:
-            """Convert single assumption from new format to legacy format."""
-            if isinstance(assumption_obj, dict):
-                method = assumption_obj.get("method", "").lower()
-                
-                # Map method names: "stable" -> "constant", "step" -> "step", "manual" -> "custom"
-                method_map = {
-                    "stable": "constant",
-                    "step": "step",
-                    "manual": "custom",
-                    "percent": "constant",  # For deferred tax
-                    "revenue": "constant",   # For capex
-                }
-                assumption_type = method_map.get(method, method)
-                
-                # Extract values based on method
-                values = []
-                if method == "step":
-                    step_value = assumption_obj.get("stepValue")
-                    if step_value is not None and step_value != "":
-                        try:
-                            step_val = float(step_value)
-                            # Generate step values: [v, v+step, v+2*step, v+3*step, v+4*step]
-                            # For step method, each period increases by the step amount
-                            # stepValue represents the step amount (increment per period)
-                            values = [step_val * (i + 1) for i in range(forecast_periods)]
-                        except (ValueError, TypeError):
-                            logger.warning(f"Could not convert stepValue '{step_value}' to float")
-                elif method == "stable":
-                    stable_value = assumption_obj.get("stableValue")
-                    if stable_value is not None and stable_value != "":
-                        try:
-                            stable_val = float(stable_value)
-                            # Generate constant values: [v, v, v, v, v]
-                            values = [stable_val] * forecast_periods
-                        except (ValueError, TypeError):
-                            logger.warning(f"Could not convert stableValue '{stable_value}' to float")
-                elif method == "manual":
-                    # Check for values array
-                    if "values" in assumption_obj:
-                        values = assumption_obj["values"]
-                    elif "stepValue" in assumption_obj:
-                        # Fallback to step if values not provided
-                        try:
-                            step_val = float(assumption_obj["stepValue"])
-                            values = [step_val + i * step_val for i in range(forecast_periods)]
-                        except (ValueError, TypeError):
-                            pass
-                elif method == "percent":
-                    # For deferred tax - use percent value as constant
-                    percent_value = assumption_obj.get("percent")
-                    if percent_value is not None:
-                        try:
-                            percent_val = float(percent_value)
-                            values = [percent_val] * forecast_periods
-                        except (ValueError, TypeError):
-                            pass
-                elif method == "revenue":
-                    # For capex - use value as constant
-                    value = assumption_obj.get("value")
-                    if value is not None:
-                        try:
-                            val = float(value)
-                            values = [val] * forecast_periods
-                        except (ValueError, TypeError):
-                            pass
-                
-                return {"type": assumption_type, "values": values}
-            elif isinstance(assumption_obj, (int, float, str)):
-                # Direct value (like shareRepurchases: "1")
-                try:
-                    val = float(assumption_obj)
-                    return {"type": "constant", "values": [val] * forecast_periods}
-                except (ValueError, TypeError):
-                    return {"type": "constant", "values": [0.0] * forecast_periods}
-            else:
-                return {"type": "constant", "values": [0.0] * forecast_periods}
-        
-        # Convert Income Statement assumptions
-        if "incomeStatement" in assumptions:
-            legacy["assumptions"] = {}
-            is_data = assumptions["incomeStatement"]
-            
-            # Map field names: camelCase -> snake_case
-            field_mapping = {
-                "revenue": "revenue",
-                "grossMargin": "gross_margin",
-                "operatingMargin": "operating_margin",
-                "taxRate": "tax_rate",
-                "interestRateOnDebt": "interest_rate_debt",
-            }
-            
-            for new_key, legacy_key in field_mapping.items():
-                if new_key in is_data:
-                    legacy["assumptions"][legacy_key] = convert_assumption_value(is_data[new_key])
-        
-        # Convert Balance Sheet assumptions
-        if "balanceSheet" in assumptions:
-            legacy["balance_sheet"] = {}
-            bs_data = assumptions["balanceSheet"]
-            
-            # Map field names
-            field_mapping = {
-                "depreciation": "depreciation_ppe",
-                "inventory": "inventory_sales",
-                "totalDebt": "total_debt_amount",
-                "debtChange": "lt_debt_change",
-                "longTermDebtChange": "lt_debt_change",
-            }
-            
-            for new_key, legacy_key in field_mapping.items():
-                if new_key in bs_data:
-                    legacy["balance_sheet"][legacy_key] = convert_assumption_value(bs_data[new_key])
-        
-        # Convert Cash Flow assumptions
-        if "cashFlow" in assumptions:
-            legacy["cash_flow"] = {}
-            cf_data = assumptions["cashFlow"]
-            
-            # Map field names
-            if "shareRepurchases" in cf_data:
-                legacy["cash_flow"]["share_repurchases"] = convert_assumption_value(cf_data["shareRepurchases"])
-            if "dividendPercentNI" in cf_data:
-                legacy["cash_flow"]["dividends_ni"] = convert_assumption_value(cf_data["dividendPercentNI"])
-            if "capex" in cf_data:
-                legacy["cash_flow"]["capex"] = convert_assumption_value(cf_data["capex"])
-            # Optional additional mappings: deferred tax and change in working capital
-            if "deferredTax" in cf_data:
-                legacy["cash_flow"]["deferred_tax"] = convert_assumption_value(cf_data["deferredTax"])
-            if "changeInWC" in cf_data:
-                legacy["cash_flow"]["change_in_working_capital"] = convert_assumption_value(cf_data["changeInWC"])
-
-        # Scale percent-based assumptions to decimals (always assumption / 100, e.g., 5 → 0.05)
-        def _scale_percent_block(block: Dict[str, Any], keys: List[str]) -> None:
-            for key in keys:
-                item = block.get(key)
-                if isinstance(item, dict) and "values" in item and isinstance(item["values"], list):
-                    scaled_values: List[float] = []
-                    for v in item["values"]:
-                        try:
-                            num = float(v)
-                            # Always treat as whole percent and convert to decimal
-                            num = num / 100.0
-                            scaled_values.append(num)
-                        except (ValueError, TypeError):
-                            scaled_values.append(v)
-                    item["values"] = scaled_values
-
-        # Income Statement percent assumptions
-        if "assumptions" in legacy:
-            _scale_percent_block(
-                legacy["assumptions"],
-                [
-                    "revenue",
-                    "gross_margin",
-                    "operating_margin",
-                    "tax_rate",
-                    "interest_rate_debt",
-                ],
-            )
-
-        # Balance Sheet percent assumptions
-        if "balance_sheet" in legacy:
-            _scale_percent_block(
-                legacy["balance_sheet"],
-                [
-                    "depreciation_ppe",
-                    "inventory_sales",
-                    "lt_debt_change",
-                ],
-            )
-
-        # Cash Flow percent assumptions
-        if "cash_flow" in legacy:
-            _scale_percent_block(
-                legacy["cash_flow"],
-                [
-                    "dividends_ni",
-                ],
-            )
-        
-        # Extract DCF assumptions to top level for populate_wacc_and_assumptions
-        if "dcf" in assumptions:
-            dcf_data = assumptions["dcf"]
-            
-            # Extract beta (could be calculated or manual)
-            if "beta" in dcf_data:
-                beta_obj = dcf_data["beta"]
-                if isinstance(beta_obj, dict):
-                    if beta_obj.get("method") == "calculate":
-                        # Use calculated value if available
-                        calculated = beta_obj.get("calculated")
-                        if calculated:
-                            try:
-                                legacy["beta"] = float(calculated)
-                            except (ValueError, TypeError):
-                                pass
-                    else:
-                        # Manual beta - might be in a different field
-                        manual_beta = beta_obj.get("value") or beta_obj.get("manual")
-                        if manual_beta:
-                            try:
-                                legacy["beta"] = float(manual_beta)
-                            except (ValueError, TypeError):
-                                pass
-            
-            # Extract other DCF assumptions
-            if "marketRiskPremium" in dcf_data:
-                try:
-                    mrp_val = float(dcf_data["marketRiskPremium"])
-                    # Always treat as whole percent and convert to decimal
-                    legacy["market_risk_premium"] = mrp_val / 100.0
-                except (ValueError, TypeError):
-                    pass
-            
-            if "riskFreeRate" in dcf_data:
-                try:
-                    rfr_val = float(dcf_data["riskFreeRate"])
-                    # Always treat as whole percent and convert to decimal
-                    legacy["risk_free_rate"] = rfr_val / 100.0
-                except (ValueError, TypeError):
-                    pass
-            
-            if "costOfDebt" in dcf_data:
-                try:
-                    legacy["cost_of_debt"] = float(dcf_data["costOfDebt"])
-                except (ValueError, TypeError):
-                    pass
-            
-            if "terminalGrowthRate" in dcf_data:
-                try:
-                    # Convert percentage to decimal if needed
-                    tgr = float(dcf_data["terminalGrowthRate"])
-                    legacy["terminal_growth_rate"] = tgr / 100.0 if tgr > 1 else tgr
-                except (ValueError, TypeError):
-                    pass
-            
-            # Extract tax_rate from DCF if available (even though DCF cells are formula-driven)
-            if "taxRate" in dcf_data:
-                try:
-                    legacy["tax_rate"] = float(dcf_data["taxRate"])
-                except (ValueError, TypeError):
-                    pass
-        
-        # Extract and normalize scenario-specific assumptions (Bear/Bull)
-        def _convert_scenario_block(
-            src: Dict[str, Any],
-            base_cash_flow: Optional[Dict[str, Any]] = None,
-        ) -> Dict[str, Any]:
-            scenario: Dict[str, Any] = {}
-            if not isinstance(src, dict):
-                return scenario
-
-            # Map project JSON keys → scenario keys used by the DCF scenario engine
-            field_mapping = {
-                # Revenue growth (%)
-                "revenue": "revenue_growth",
-                "revenueGrowth": "revenue_growth",
-                # Gross margin (%)
-                "grossMargin": "gp_margin",
-                # EBIT margin (%)
-                "operatingMargin": "ebit_margin",
-                # D&A as % of revenue
-                "depreciationPercentRevenue": "da_pct_rev",
-                "depreciationPercentOfRevenue": "da_pct_rev",
-                # CapEx as % of revenue
-                "capex": "capex_pct_rev",
-                "capexPercentRevenue": "capex_pct_rev",
-                # CapEx as % of D&A (if provided)
-                "capexPercentDA": "capex_pct_da",
-                "capexPctDA": "capex_pct_da",
-                # Changes in working capital (% of revenue)
-                "changeInWC": "wc_change",
-                "changesInWC": "wc_change",
-                "changeInWorkingCapital": "wc_change",
-            }
-
-            for new_key, legacy_key in field_mapping.items():
-                if new_key in src:
-                    scenario[legacy_key] = convert_assumption_value(src[new_key])
-
-            # Scenario-specific terminal growth rate
-            if "terminalGrowthRate" in src:
-                try:
-                    tgr = float(src["terminalGrowthRate"])
-                    scenario["terminalGrowthRate"] = tgr / 100.0 if tgr > 1 else tgr
-                except (ValueError, TypeError):
-                    pass
-
-            # Scale percent-type fields in scenario (values are in percent points)
-            _scale_percent_block(
-                scenario,
-                [
-                    "revenue_growth",
-                    "gp_margin",
-                    "ebit_margin",
-                    "da_pct_rev",
-                    "capex_pct_rev",
-                    "capex_pct_da",
-                    "wc_change",
-                ],
-            )
-
-            # If wc_change not provided at scenario level, fall back to base cash_flow
-            if "wc_change" not in scenario and base_cash_flow:
-                base_wc = base_cash_flow.get("change_in_working_capital")
-                if isinstance(base_wc, dict):
-                    scenario["wc_change"] = base_wc
-
-            return scenario
-
-        if "bearScenario" in assumptions and isinstance(assumptions["bearScenario"], dict):
-            legacy["bearScenario"] = _convert_scenario_block(
-                assumptions["bearScenario"],
-                legacy.get("cash_flow"),
-            )
-        
-        if "bullScenario" in assumptions and isinstance(assumptions["bullScenario"], dict):
-            legacy["bullScenario"] = _convert_scenario_block(
-                assumptions["bullScenario"],
-                legacy.get("cash_flow"),
-            )
-
-        return legacy
-    
-    # Unknown format, return as-is
-    logger.warning("Unknown assumptions format, returning as-is")
-    return assumptions
 
 
 def _transform_array_format_to_standard(data: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -759,7 +373,82 @@ def _transform_array_format_to_standard(data: List[Dict[str, Any]]) -> Dict[str,
     }
     
     logger.info(f"Transformed array format JSON: {len(data)} periods -> {len(line_items)} line items")
+    
+    # Normalize CAPEX and Share Repurchases values to be negative
+    result = _normalize_capex_and_share_repurchases(result)
+    
     return result
+
+
+def _normalize_capex_and_share_repurchases(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize CAPEX and Share Repurchases values to always be negative.
+    
+    This function ensures that:
+    - cashFlow.capex.value is always negative
+    - cashFlow.shareRepurchases is always negative
+    - bearScenario.capex.value is always negative
+    - bullScenario.capex.value is always negative
+    
+    All other fields remain exactly as provided.
+    
+    Args:
+        data: The JSON data dictionary
+        
+    Returns:
+        Normalized JSON data dictionary
+    """
+    def ensure_negative(value: Union[str, int, float, None]) -> Union[str, int, float, None]:
+        """Ensure a value is always negative."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            if value == "" or value.strip() == "":
+                return value
+            try:
+                num_value = float(value)
+                if num_value < 0:
+                    return value  # Already negative
+                return str(-abs(num_value))  # Make negative
+            except (ValueError, TypeError):
+                return value  # Not a number
+        if isinstance(value, (int, float)):
+            if value < 0:
+                return value  # Already negative
+            return -abs(value)  # Make negative
+        return value
+    
+    # Normalize cashFlow.capex.value
+    if "cashFlow" in data and isinstance(data["cashFlow"], dict):
+        if "capex" in data["cashFlow"] and isinstance(data["cashFlow"]["capex"], dict):
+            if "value" in data["cashFlow"]["capex"]:
+                data["cashFlow"]["capex"]["value"] = ensure_negative(
+                    data["cashFlow"]["capex"]["value"]
+                )
+        
+        # Normalize cashFlow.shareRepurchases
+        if "shareRepurchases" in data["cashFlow"]:
+            data["cashFlow"]["shareRepurchases"] = ensure_negative(
+                data["cashFlow"]["shareRepurchases"]
+            )
+    
+    # Normalize bearScenario.capex.value
+    if "bearScenario" in data and isinstance(data["bearScenario"], dict):
+        if "capex" in data["bearScenario"] and isinstance(data["bearScenario"]["capex"], dict):
+            if "value" in data["bearScenario"]["capex"]:
+                data["bearScenario"]["capex"]["value"] = ensure_negative(
+                    data["bearScenario"]["capex"]["value"]
+                )
+    
+    # Normalize bullScenario.capex.value
+    if "bullScenario" in data and isinstance(data["bullScenario"], dict):
+        if "capex" in data["bullScenario"] and isinstance(data["bullScenario"]["capex"], dict):
+            if "value" in data["bullScenario"]["capex"]:
+                data["bullScenario"]["capex"]["value"] = ensure_negative(
+                    data["bullScenario"]["capex"]["value"]
+                )
+    
+    return data
 
 
 def _convert_fmp_array_to_line_items(
@@ -831,8 +520,8 @@ def _convert_fmp_array_to_line_items(
             "longTermInvestments": "BS_MARKETABLE_SECURITIES",  # Long-Term Investments - using BS_MARKETABLE_SECURITIES as placeholder
             "taxAssets": "BS_ASSETS_NONCURRENT",  # Tax Assets - using BS_ASSETS_NONCURRENT as placeholder
             "otherNonCurrentAssets": "BS_ASSETS_NONCURRENT",  # Other Non-Current Assets
-            "totalNonCurrentAssets": None,  # Skipped - row removed from template
-            "otherAssets": None,  # Skipped - row removed from template
+            "totalNonCurrentAssets": "BS_ASSETS_NONCURRENT",
+            "otherAssets": "BS_ASSETS_TOTAL",  # Other Assets - using BS_ASSETS_TOTAL as placeholder
             "totalAssets": "BS_ASSETS_TOTAL",
             "accountsPayable": "BS_ACCOUNTS_PAYABLE",
             "accountPayables": "BS_ACCOUNTS_PAYABLE",  # Alternative field name
@@ -875,17 +564,17 @@ def _convert_fmp_array_to_line_items(
             "inventory": None,  # Component of working capital, skip
             "accountsPayables": None,  # Component of working capital, skip
             "otherWorkingCapital": None,  # Component of working capital, skip
-            "otherNonCashItems": None,  # Skip - not in template
+            "otherNonCashItems": None,  # Skip for now
             "netCashProvidedByOperatingActivities": "CF_CASH_FROM_OPERATIONS",
             "investmentsInPropertyPlantAndEquipment": "CF_CAPEX",
-            "acquisitionsNet": None,  # Deleted from template
-            "purchasesOfInvestments": None,  # Deleted from template
-            "salesMaturitiesOfInvestments": None,  # Skip - not in template
-            "otherInvestingActivities": None,  # Deleted from template
-            "netCashProvidedByInvestingActivities": None,  # Deleted from template
+            "acquisitionsNet": "CF_CASH_FROM_INVESTING",  # Net Acquisitions - using CF_CASH_FROM_INVESTING as placeholder
+            "purchasesOfInvestments": "CF_CASH_FROM_INVESTING",  # Purchases of Investments
+            "salesMaturitiesOfInvestments": None,  # Skip for now
+            "otherInvestingActivities": "CF_CASH_FROM_INVESTING",  # Other Investing Activities
+            "netCashProvidedByInvestingActivities": "CF_CASH_FROM_INVESTING",
             "netDebtIssuance": None,  # Computed, skip
-            "longTermNetDebtIssuance": None,  # Deleted from template
-            "shortTermNetDebtIssuance": None,  # Skip - not in template
+            "longTermNetDebtIssuance": "CF_DEBT_ISSUANCE",  # Approximate
+            "shortTermNetDebtIssuance": None,  # Skip for now
             "netStockIssuance": "CF_SHARE_REPURCHASES",  # Net Stock Issuance - using CF_SHARE_REPURCHASES as placeholder
             "netCommonStockIssuance": "CF_SHARE_REPURCHASES",  # Net Common Stock Issuance
             "commonStockIssuance": "CF_SHARE_REPURCHASES",  # Common Stock Issued
@@ -998,11 +687,7 @@ def _convert_fmp_array_to_line_items(
             "commonDividendsPaid": "Common Dividends Paid",
             "otherFinancingActivities": "Other Financing Activities",
             "netCashProvidedByFinancingActivities": "Net Cash Provided by Financing Activities",
-            "effectOfForexChangesOnCash": "Effect of Foreign Exchange on Cash",
-            "cashAtBeginningOfPeriod": "Cash at Beginning of Period",
             "netChangeInCash": "Net Change in Cash",
-            "cashAtEndOfPeriod": "Cash at End of Period",
-            "freeCashFlow": "Free Cash Flow",
         },
     }
     
@@ -1040,14 +725,7 @@ def _convert_fmp_array_to_line_items(
         
         # Process fields in order if specified, otherwise use dict order
         if field_order:
-            # Include fields that exist in period, even if value is 0 (zero values are meaningful)
-            fields_to_process = []
-            for field_name in field_order:
-                if field_name in period:
-                    value = period.get(field_name)
-                    # Include the field if value is not None (including 0)
-                    if value is not None:
-                        fields_to_process.append((field_name, value))
+            fields_to_process = [(field_name, period.get(field_name)) for field_name in field_order if field_name in period]
         else:
             fields_to_process = period.items()
         
@@ -1411,7 +1089,7 @@ def populate_three_statement_year_headers(
     Year header locations (fixed rows):
     - Income Statement: Row 4
     - Balance Sheet: Row 24
-    - Cash Flow: Row 69
+    - Cash Flow: Row 71
     
     Args:
         worksheet: openpyxl Worksheet object for "3 Statement" sheet
@@ -1489,8 +1167,8 @@ def populate_three_statement_year_headers(
     # 2. Balance Sheet: Row 24 (fixed)
     write_years_to_row(24, "Balance Sheet")
     
-    # 3. Cash Flow: Row 69 (fixed)
-    write_years_to_row(69, "Cash Flow")
+    # 3. Cash Flow: Row 71 (fixed)
+    write_years_to_row(71, "Cash Flow")
     
     logger.info(f"Populated 3-statement year headers: Historical={recent_years}, Forecasted={forecasted_years}")
 
@@ -1598,14 +1276,10 @@ def add_model_role_column(worksheet, role_column: str = "ZZ") -> None:
             cell_value = str(cell.value).strip().lower()
             
             # Check if this label maps to a model role
-            # Sort patterns by length (longest first) to match more specific patterns first
-            # This ensures "cost of revenue" matches before "revenue"
-            sorted_patterns = sorted(ROW_LABEL_TO_MODEL_ROLE.items(), key=lambda x: len(x[0]), reverse=True)
-            for label_pattern, model_role in sorted_patterns:
+            for label_pattern, model_role in ROW_LABEL_TO_MODEL_ROLE.items():
                 if label_pattern in cell_value:
                     role_cell = worksheet.cell(row=row_idx, column=col_idx)
                     role_cell.value = model_role
-                    logger.debug(f"Matched row {row_idx} label '{cell_value}' to model_role '{model_role}' using pattern '{label_pattern}'")
                     break
     
     # Hide the column
@@ -1670,11 +1344,7 @@ def populate_historicals(
             if year in role_values:
                 value = role_values[year]
                 target_cell = worksheet.cell(row=row_idx, column=column_idx)
-                # Scale to millions
-                if isinstance(value, (int, float)):
-                    target_cell.value = value / MILLIONS_SCALE
-                else:
-                    target_cell.value = value
+                target_cell.value = value
 
 
 def _get_current_stock_price(ticker: str, use_fake_data: bool = False) -> Tuple[Optional[float], Optional[str]]:
@@ -2475,9 +2145,8 @@ def populate_cover_sheet(
         cover_sheet = workbook["Cover Page"]
     
     if cover_sheet:
-        # Write company name to B2 (row 2, column 2) - always overwrite
+        # Write company name to B2 (row 2, column 2)
         cover_sheet.cell(row=2, column=2).value = company_name
-        logger.debug(f"Wrote company name '{company_name}' to Cover Sheet B2")
         
         # Write ticker to B3 (row 3, column 2)
         cover_sheet.cell(row=3, column=2).value = ticker
@@ -2497,9 +2166,8 @@ def populate_cover_sheet(
         summary_sheet = workbook["Summary"]
     
     if summary_sheet:
-        # Write company name to B2 (row 2, column 2) - always overwrite
+        # Write company name to B2 (row 2, column 2)
         summary_sheet.cell(row=2, column=2).value = company_name
-        logger.debug(f"Wrote company name '{company_name}' to Summary Sheet B2")
         
         # Write ticker to C3 (row 3, column 3)
         summary_sheet.cell(row=3, column=3).value = ticker
@@ -2529,12 +2197,12 @@ def populate_cover_sheet(
         logger.info(f"Wrote price ${stock_price:.2f} to Summary sheet C4 (row 4, column 3)")
         
         # Write as-of date directly to the right (D4 - row 4, column 4)
-        if date is None:
-            date = datetime.now().strftime("%m/%d/%Y")
+    if date is None:
+        date = datetime.now().strftime("%m/%d/%Y")
         as_of_text = f"As of {date}"
         summary_sheet.cell(row=4, column=4).value = as_of_text
         logger.info(f"Wrote as-of date '{as_of_text}' to Summary sheet D4 (row 4, column 4)")
-        
+    
         logger.info(f"Populated Summary sheet: Company={company_name}, Ticker={ticker}, Price=${stock_price:.2f}, As-of={as_of_text}")
     else:
         logger.warning("Summary sheet not found, skipping Summary sheet population")
@@ -2607,42 +2275,35 @@ def populate_three_statement_assumptions(
         bs_anchor_row = 24
         logger.info("Using fixed row 24 for Balance Sheet assumptions (overriding dynamic search)")
     
-    # Cash Flow assumptions: anchored to row 69 (same as year headers)
+    # Cash Flow assumptions: anchored to row 71 (same as year headers)
     if cf_anchor_row is None:
-        cf_anchor_row = 69
-        logger.info("Using fixed row 69 for Cash Flow assumptions")
+        cf_anchor_row = 71
+        logger.info("Using fixed row 71 for Cash Flow assumptions")
     else:
-        # Override with fixed row 69 to match year headers
-        cf_anchor_row = 69
-        logger.info("Using fixed row 69 for Cash Flow assumptions (overriding dynamic search)")
+        # Override with fixed row 71 to match year headers
+        cf_anchor_row = 71
+        logger.info("Using fixed row 71 for Cash Flow assumptions (overriding dynamic search)")
     
     # Mapping of assumption names to their row offsets from section headers
     # Column N = 14 (Type), Column O = 15 (Value start), P=16, Q=17, R=18, S=19
-    # Supports both legacy format names and new format names
     assumption_mapping = {
         "income_statement": {
             "revenue": {"row_offset": 1},  # IS header + 1 = row 5
             "gross_margin": {"row_offset": 2},  # IS header + 2 = row 6
-            "operating_margin": {"row_offset": 3},  # IS header + 3 = row 7 (legacy format)
-            "operating_cost": {"row_offset": 3},  # IS header + 3 = row 7 (new format)
-            "tax_rate": {"row_offset": 4},  # IS header + 4 = row 8
-            "interest_rate_debt": {"row_offset": 5},  # IS header + 5 = row 9 (legacy format)
-            "interest_rate_on_debt": {"row_offset": 5},  # IS header + 5 = row 9 (new format)
+            "operating_cost": {"row_offset": 3},  # IS header + 3 = row 7
+            "ebitda_margin": {"row_offset": 4},  # IS header + 4 = row 8
+            "tax_rate": {"row_offset": 5},  # IS header + 5 = row 9
+            "interest_rate_on_debt": {"row_offset": 6},  # IS header + 6 = row 10
         },
         "balance_sheet": {
-            "depreciation_ppe": {"row_offset": 1},  # BS header + 1 = row 25 (legacy format)
-            "depreciation_pct_of_ppe": {"row_offset": 1},  # BS header + 1 = row 25 (new format)
-            "inventory_sales": {"row_offset": 2},  # BS header + 2 = row 26 (legacy format)
-            "inventory": {"row_offset": 2},  # BS header + 2 = row 26 (new format)
-            "lt_debt_change": {"row_offset": 3},  # BS header + 3 = row 27 (legacy format)
-            "total_debt_amount": {"row_offset": 3},  # BS header + 3 = row 27 (new format)
+            "depreciation_pct_of_ppe": {"row_offset": 1},  # BS header + 1 = row 22
+            "inventory": {"row_offset": 2},  # BS header + 2 = row 23
+            "total_debt_amount": {"row_offset": 3},  # BS header + 3 = row 24
         },
         "cash_flow": {
-            "share_repurchases": {"row_offset": 1},  # CF header (69) + 1 = row 70 (legacy format)
-            "share_repurchase": {"row_offset": 1},  # CF header (69) + 1 = row 70 (new format)
-            "dividends_ni": {"row_offset": 2},  # CF header (69) + 2 = row 71 (legacy format)
-            "dividend_pct_of_net_income": {"row_offset": 2},  # CF header (69) + 2 = row 71 (new format)
-            "capex": {"row_offset": 3},  # CF header (69) + 3 = row 72
+            "share_repurchase": {"row_offset": 1},  # CF header + 1 = row 52
+            "dividend_pct_of_net_income": {"row_offset": 2},  # CF header + 2 = row 53
+            "capex": {"row_offset": 3},  # CF header + 3 = row 54
         },
     }
     
@@ -2650,20 +2311,8 @@ def populate_three_statement_assumptions(
     TYPE_COLUMN = 14
     VALUE_START_COLUMN = 15
     
-    # Normalize assumptions format: handle both legacy format (assumptions key) and new format (income_statement key)
-    normalized_assumptions = {}
-    if "assumptions" in assumptions:
-        # Legacy format: convert "assumptions" -> "income_statement"
-        normalized_assumptions["income_statement"] = assumptions["assumptions"]
-    if "income_statement" in assumptions:
-        normalized_assumptions["income_statement"] = assumptions["income_statement"]
-    if "balance_sheet" in assumptions:
-        normalized_assumptions["balance_sheet"] = assumptions["balance_sheet"]
-    if "cash_flow" in assumptions:
-        normalized_assumptions["cash_flow"] = assumptions["cash_flow"]
-    
     # Process each statement type
-    for statement_type, statement_assumptions in normalized_assumptions.items():
+    for statement_type, statement_assumptions in assumptions.items():
         if statement_type not in assumption_mapping:
             logger.warning(f"Unknown statement type: {statement_type}")
             continue
@@ -2693,25 +2342,7 @@ def populate_three_statement_assumptions(
             row_offset = mapping[assumption_name]["row_offset"]
             row = section_header_row + row_offset
             assumption_type = assumption_data.get("type", "").lower()
-            
-            # Handle both "value" (singular) and "values" (array) formats
             value = assumption_data.get("value")
-            values = assumption_data.get("values")
-            
-            # If we have values array but no value, extract appropriate value based on type
-            if value is None and values is not None and isinstance(values, list) and len(values) > 0:
-                if assumption_type == "step":
-                    # For step, use the increment (difference between first two values, or first value if only one)
-                    if len(values) >= 2:
-                        value = values[1] - values[0]
-                    else:
-                        value = values[0]
-                elif assumption_type == "constant":
-                    # For constant, use first value
-                    value = values[0]
-                elif assumption_type == "custom":
-                    # For custom, use the values array directly
-                    value = values
             
             if not assumption_type:
                 logger.warning(f"Missing type for assumption '{assumption_name}'")
@@ -2753,13 +2384,10 @@ def populate_three_statement_assumptions(
             
             elif assumption_type == "custom":
                 # Custom type: write array of values to O, P, Q, R, S
-                # Handle both "value" (which might be a list) and "values" array
-                values_to_write = value if isinstance(value, list) else values
-                if isinstance(values_to_write, list) and len(values_to_write) >= forecast_periods:
-                    for period_idx in range(forecast_periods):
+                if isinstance(value, list) and len(value) == forecast_periods:
+                    for period_idx, period_value in enumerate(value):
                         col = VALUE_START_COLUMN + period_idx
                         value_cell = worksheet.cell(row=row, column=col)
-                        period_value = values_to_write[period_idx]
                         value_cell.value = period_value
                         # Set number format to prevent date interpretation
                         if isinstance(period_value, (int, float)):
@@ -2767,9 +2395,9 @@ def populate_three_statement_assumptions(
                                 value_cell.number_format = "0.00%"
                             else:
                                 value_cell.number_format = "General"
-                    logger.debug(f"Wrote custom assumption '{assumption_name}': {values_to_write[:forecast_periods]} to row {row}, columns {VALUE_START_COLUMN}-{VALUE_START_COLUMN + forecast_periods - 1}")
+                    logger.debug(f"Wrote custom assumption '{assumption_name}': {value} to row {row}, columns {VALUE_START_COLUMN}-{VALUE_START_COLUMN + forecast_periods - 1}")
                 else:
-                    logger.warning(f"Custom assumption '{assumption_name}' must have at least {forecast_periods} values, got {len(values_to_write) if isinstance(values_to_write, list) else 'non-list'}")
+                    logger.warning(f"Custom assumption '{assumption_name}' must have {forecast_periods} values, got {len(value) if isinstance(value, list) else 'non-list'}")
             
             else:
                 logger.warning(f"Unknown assumption type '{assumption_type}' for '{assumption_name}'")
@@ -3609,7 +3237,7 @@ def populate_three_statement_historicals(
         else:
             # Unknown role, skip it (or could log a warning)
             continue
-
+        
         # Look up values for this model_role
         role_values = matrix.get(model_role, {})
         
@@ -3675,45 +3303,35 @@ def populate_three_statement_historicals(
                         matching_item = item
                         break
             
+            if not matching_item:
+                logger.debug(f"No line item found for {field_name}")
+                continue
+            
             # Get periods from the line item
-            periods = matching_item.get("periods", {}) if matching_item else {}
+            periods = matching_item.get("periods", {})
+            if not periods:
+                continue
             
             # Write values to columns D, E, F (columns 4, 5, 6)
             # Include zero values as they're meaningful in financial statements
-            # For otherExpenses specifically, ensure we write even if value is 0
-            if periods:
-                for period_date, value in periods.items():
-                    try:
-                        # Extract year from period date
-                        year = int(str(period_date).split("-")[0])
-                        if year in year_column_map:
-                            column_idx = year_column_map[year]
-                            target_cell = worksheet.cell(row=target_row, column=column_idx)
-                            # Write value even if it's 0 (zero values are meaningful)
-                            # Scale to millions
-                            # Explicitly handle 0 values - they should be written
-                            if value == 0 or value == 0.0:
-                                target_cell.value = 0.0
-                            else:
-                                target_cell.value = float(value) / MILLIONS_SCALE
-                            
-                            # Set number format
-                            target_cell.number_format = "General"
-                            logger.debug(f"Wrote {field_name} = {value} to row {target_row}, column {column_idx}")
-                    except (ValueError, IndexError, TypeError) as e:
-                        logger.debug(f"Error processing {field_name} period {period_date}: {e}")
-                        continue
-                
-                logger.debug(f"Wrote {field_name} to row {target_row}")
-            elif matching_item:
-                # If we found the item but no periods, log a warning
-                # This shouldn't happen if the conversion is working correctly
-                logger.warning(f"Found {field_name} line item but no periods data - this may indicate a conversion issue")
-            else:
-                # For otherExpenses, log more detail since it's required to be written even if 0
-                if field_name == "otherExpenses":
-                    logger.warning(f"otherExpenses not found in income statement line items. Available tags: {[item.get('tag') for item in income_items[:10]]}")
-                logger.debug(f"No line item found for {field_name}")
+            for period_date, value in periods.items():
+                try:
+                    # Extract year from period date
+                    year = int(str(period_date).split("-")[0])
+                    if year in year_column_map:
+                        column_idx = year_column_map[year]
+                        target_cell = worksheet.cell(row=target_row, column=column_idx)
+                        # Write value even if it's 0 (zero values are meaningful)
+                        # Scale to millions
+                        target_cell.value = float(value) / MILLIONS_SCALE
+                        
+                        # Set number format
+                        target_cell.number_format = "General"
+                except (ValueError, IndexError, TypeError) as e:
+                    logger.debug(f"Error processing {field_name} period {period_date}: {e}")
+                    continue
+            
+            logger.debug(f"Wrote {field_name} to row {target_row}")
     
     # Step 4: Write balance sheet fields to fixed rows (bypassing model_role matching)
     # These rows have fixed positions in the Excel template
@@ -3737,39 +3355,41 @@ def populate_three_statement_historicals(
             "longTermInvestments": 35,  # Long-Term Investments
             "taxAssets": 36,  # Tax Assets
             "otherNonCurrentAssets": 37,  # Other Non-Current Assets
-            "totalAssets": 40,  # Total Assets
+            "totalNonCurrentAssets": 38,  # Total Non-Current Assets
+            "otherAssets": 40,  # Other Assets (moved from row 39 to 40)
+            "totalAssets": 42,  # Total Assets (moved from row 41 to 42, row 40 is "Total Long-term Assets" which may be computed)
             # Liabilities section
-            "accountsPayable": 42,  # Accounts Payable
-            "accountPayables": 42,  # Accounts Payable (alternative field name)
-            "otherPayables": 43,  # Other Payables
-            "accruedExpenses": 44,  # Accrued Expenses
-            "shortTermDebt": 45,  # Short-Term Debt
-            "capitalLeaseObligationsCurrent": 46,  # Current Capital Lease Obligations
-            "currentCapitalLeaseObligations": 46,  # Current Capital Lease Obligations (alternative)
-            "taxPayables": 47,  # Tax Payables
-            "deferredRevenue": 48,  # Deferred Revenue (Current)
-            "otherCurrentLiabilities": 49,  # Other Current Liabilities
-            "totalCurrentLiabilities": 50,  # Total Current Liabilities
-            "longTermDebt": 51,  # Long-Term Debt
-            "capitalLeaseObligationsNonCurrent": 52,  # Non-Current Capital Lease Obligations
-            "nonCurrentCapitalLeaseObligations": 52,  # Non-Current Capital Lease Obligations (alternative)
-            "deferredRevenueNonCurrent": 53,  # Deferred Revenue (Non-Current)
-            "deferredTaxLiabilitiesNonCurrent": 54,  # Deferred Tax Liabilities (Non-Current)
-            "otherNonCurrentLiabilities": 55,  # Other Non-Current Liabilities
-            "totalNonCurrentLiabilities": 56,  # Total Non-Current Liabilities
-            "totalLiabilities": 57,  # Total Liabilities
+            "accountsPayable": 44,  # Accounts Payable (moved from row 43)
+            "accountPayables": 44,  # Accounts Payable (alternative field name, moved from row 43)
+            "otherPayables": 45,  # Other Payables (moved from row 44)
+            "accruedExpenses": 46,  # Accrued Expenses (moved from row 45)
+            "shortTermDebt": 47,  # Short-Term Debt (moved from row 46)
+            "capitalLeaseObligationsCurrent": 48,  # Current Capital Lease Obligations (moved from row 47)
+            "currentCapitalLeaseObligations": 48,  # Current Capital Lease Obligations (alternative, moved from row 47)
+            "taxPayables": 49,  # Tax Payables (moved from row 48)
+            "deferredRevenue": 50,  # Deferred Revenue (Current) (moved from row 49)
+            "otherCurrentLiabilities": 51,  # Other Current Liabilities (moved from row 50)
+            "totalCurrentLiabilities": 52,  # Total Current Liabilities (moved from row 51)
+            "longTermDebt": 53,  # Long-Term Debt (moved from row 52)
+            "capitalLeaseObligationsNonCurrent": 54,  # Non-Current Capital Lease Obligations (moved from row 53)
+            "nonCurrentCapitalLeaseObligations": 54,  # Non-Current Capital Lease Obligations (alternative, moved from row 53)
+            "deferredRevenueNonCurrent": 55,  # Deferred Revenue (Non-Current) (moved from row 54)
+            "deferredTaxLiabilitiesNonCurrent": 56,  # Deferred Tax Liabilities (Non-Current) (moved from row 55)
+            "otherNonCurrentLiabilities": 57,  # Other Non-Current Liabilities (moved from row 56)
+            "totalNonCurrentLiabilities": 58,  # Total Non-Current Liabilities (moved from row 57)
+            "totalLiabilities": 59,  # Total Liabilities (moved from row 58)
             # Equity section
-            "preferredStock": 59,  # Preferred Stock
-            "treasuryStock": 60,  # Treasury Stock
-            "commonStock": 61,  # Common Stock
-            "retainedEarnings": 62,  # Retained Earnings
-            "additionalPaidInCapital": 63,  # Additional Paid-In Capital
-            "accumulatedOtherComprehensiveIncomeLoss": 64,  # Accumulated Other Comprehensive Income (Loss)
-            "otherStockholdersEquity": 65,  # Other Stockholders' Equity
-            "otherTotalStockholdersEquity": 65,  # Other Stockholders' Equity (alternative field name)
-            "totalEquity": 66,  # Total Equity
-            "totalStockholdersEquity": 66,  # Total Equity (alternative field name)
-            # Note: Row 67 is "Total Liabilities & Equity" which is computed, so we don't map it
+            "preferredStock": 61,  # Preferred Stock (moved from row 60)
+            "treasuryStock": 62,  # Treasury Stock (moved from row 61)
+            "commonStock": 63,  # Common Stock (moved from row 62)
+            "retainedEarnings": 64,  # Retained Earnings (moved from row 63)
+            "additionalPaidInCapital": 65,  # Additional Paid-In Capital (moved from row 64)
+            "accumulatedOtherComprehensiveIncomeLoss": 66,  # Accumulated Other Comprehensive Income (Loss) (moved from row 65)
+            "otherStockholdersEquity": 67,  # Other Stockholders' Equity (moved from row 66)
+            "otherTotalStockholdersEquity": 67,  # Other Stockholders' Equity (alternative field name, moved from row 66)
+            "totalEquity": 68,  # Total Equity (moved from row 67)
+            "totalStockholdersEquity": 68,  # Total Equity (alternative field name, moved from row 67)
+            # Note: Row 69 is "Total Liabilities & Equity" which is computed, so we don't map it (moved from row 68)
         }
         
         # Group line items by statement type
@@ -3785,42 +3405,33 @@ def populate_three_statement_historicals(
                     matching_item = item
                     break
             
-            # Get periods from the line item (or empty dict if not found)
-            periods = matching_item.get("periods", {}) if matching_item else {}
+            if not matching_item:
+                logger.debug(f"No line item found for balance sheet field {field_name}")
+                continue
+            
+            # Get periods from the line item
+            periods = matching_item.get("periods", {})
+            if not periods:
+                continue
             
             # Write values to columns D, E, F (columns 4, 5, 6)
-            # Include zero values as they're meaningful in financial statements
-            # For balance sheet fields, ensure we write even if value is 0
-            if periods:
-                for period_date, value in periods.items():
-                    try:
-                        # Extract year from period date
-                        year = int(str(period_date).split("-")[0])
-                        if year in year_column_map:
-                            column_idx = year_column_map[year]
-                            target_cell = worksheet.cell(row=target_row, column=column_idx)
-                            # Write value even if it's 0 (zero values are meaningful)
-                            # Scale to millions
-                            # Explicitly handle 0 values - they should be written
-                            if value == 0 or value == 0.0:
-                                target_cell.value = 0.0
-                            else:
-                                target_cell.value = float(value) / MILLIONS_SCALE
-                            
-                            # Set number format
-                            target_cell.number_format = "General"
-                            logger.debug(f"Wrote balance sheet {field_name} = {value} to row {target_row}, column {column_idx}")
-                    except (ValueError, IndexError, TypeError) as e:
-                        logger.debug(f"Error processing balance sheet {field_name} period {period_date}: {e}")
-                        continue
-                
-                logger.debug(f"Wrote balance sheet {field_name} to row {target_row}")
-            elif matching_item:
-                # If we found the item but no periods, log a warning
-                # This shouldn't happen if the conversion is working correctly
-                logger.warning(f"Found balance sheet {field_name} line item but no periods data - this may indicate a conversion issue")
-            else:
-                logger.debug(f"No line item found for balance sheet field {field_name}")
+            for period_date, value in periods.items():
+                try:
+                    # Extract year from period date
+                    year = int(str(period_date).split("-")[0])
+                    if year in year_column_map:
+                        column_idx = year_column_map[year]
+                        target_cell = worksheet.cell(row=target_row, column=column_idx)
+                        # Scale to millions
+                        target_cell.value = float(value) / MILLIONS_SCALE
+                        
+                        # Set number format
+                        target_cell.number_format = "General"
+                except (ValueError, IndexError, TypeError) as e:
+                    logger.debug(f"Error processing balance sheet {field_name} period {period_date}: {e}")
+                    continue
+            
+            logger.debug(f"Wrote balance sheet {field_name} to row {target_row}")
     
     # Step 5: Write cash flow statement fields to fixed rows (bypassing model_role matching)
     # These rows have fixed positions in the Excel template
@@ -3831,34 +3442,19 @@ def populate_three_statement_historicals(
         # Field name (from JSON) -> row number
         fixed_cash_flow_rows = {
             # Operating Activities section
-            "netIncome": 70,  # Net Income
-            "depreciationAndAmortization": 71,  # Depreciation & Amortization
-            "deferredIncomeTax": 72,  # Deferred Income Tax
-            "stockBasedCompensation": 73,  # Stock-Based Compensation
-            "changeInWorkingCapital": 74,  # Change in Working Capital
-            "otherNonCashItems": 75,  # Other Non-Cash Items
-            "netCashProvidedByOperatingActivities": 76,  # Net Cash Provided by Operating Activities
-            # Investing Activities section
-            "investmentsInPropertyPlantAndEquipment": 78,  # Investments in Property, Plant & Equipment (CapEx)
-            "salesMaturitiesOfInvestments": 81,  # Sales / Maturities of Investments
+            "deferredIncomeTax": 73,  # Deferred Income Tax
+            "stockBasedCompensation": 74,  # Stock-Based Compensation
+            # Investing Activities section (first occurrence)
+            "acquisitionsNet": 84,  # Net Acquisitions
+            "purchasesOfInvestments": 85,  # Purchases of Investments
+            "otherInvestingActivities": 87,  # Other Investing Activities
             # Financing Activities section
-            "netDebtIssuance": 85,  # Net Debt Issuance
-            "netStockIssuance": 86,  # Net Stock Issuance
-            "netCommonStockIssuance": 87,  # Net Common Stock Issuance
-            "commonStockIssuance": 88,  # Common Stock Issued
-            "commonStockRepurchased": 89,  # Common Stock Repurchased
-            "netPreferredStockIssuance": 90,  # Net Preferred Stock Issuance
-            "dividendsPaid": 91,  # Dividends Paid (Net)
-            "commonDividendsPaid": 92,  # Common Dividends Paid
-            "preferredDividendsPaid": 93,  # Preferred Dividends Paid
-            "otherFinancingActivities": 94,  # Other Financing Activities
-            "netCashProvidedByFinancingActivities": 95,  # Net Cash Provided by Financing Activities
-            # Other items
-            "effectOfForexChangesOnCash": 97,  # Effect of Foreign Exchange on Cash
-            "cashAtBeginningOfPeriod": 99,  # Cash at Beginning of Period
-            "netChangeInCash": 100,  # Net Change in Cash
-            "cashAtEndOfPeriod": 101,  # Cash at End of Period
-            "freeCashFlow": 103,  # Free Cash Flow (renamed from Unlevered Free Cashflow)
+            "netStockIssuance": 98,  # Net Stock Issuance
+            "netCommonStockIssuance": 99,  # Net Common Stock Issuance
+            "commonStockIssuance": 100,  # Common Stock Issued
+            "commonStockRepurchased": 101,  # Common Stock Repurchased
+            "netPreferredStockIssuance": 102,  # Net Preferred Stock Issuance
+            "otherFinancingActivities": 106,  # Other Financing Activities
         }
         
         # Group line items by statement type
@@ -3901,6 +3497,49 @@ def populate_three_statement_historicals(
                     continue
             
             logger.debug(f"Wrote cash flow {field_name} to row {target_row}")
+        
+        # Handle duplicate rows for investing activities (rows 90-93)
+        # These are the same fields as rows 84-87, but appear again in the template
+        duplicate_investing_rows = {
+            "acquisitionsNet": 90,  # Net Acquisitions (second occurrence)
+            "purchasesOfInvestments": 91,  # Purchases of Investments (second occurrence)
+            "otherInvestingActivities": 93,  # Other Investing Activities (second occurrence)
+        }
+        
+        for field_name, target_row in duplicate_investing_rows.items():
+            # Find the line item by tag (field name)
+            matching_item = None
+            for item in cash_flow_items:
+                if item.get("tag") == field_name:
+                    matching_item = item
+                    break
+            
+            if not matching_item:
+                continue
+            
+            # Get periods from the line item
+            periods = matching_item.get("periods", {})
+            if not periods:
+                continue
+            
+            # Write values to columns D, E, F (columns 4, 5, 6)
+            for period_date, value in periods.items():
+                try:
+                    # Extract year from period date
+                    year = int(str(period_date).split("-")[0])
+                    if year in year_column_map:
+                        column_idx = year_column_map[year]
+                        target_cell = worksheet.cell(row=target_row, column=column_idx)
+                        # Scale to millions
+                        target_cell.value = float(value) / MILLIONS_SCALE
+                        
+                        # Set number format
+                        target_cell.number_format = "General"
+                except (ValueError, IndexError, TypeError) as e:
+                    logger.debug(f"Error processing cash flow duplicate {field_name} period {period_date}: {e}")
+                    continue
+            
+            logger.debug(f"Wrote cash flow duplicate {field_name} to row {target_row}")
     
     # Log summary
     total_populated = sum(len(roles) for roles in populated_roles.values())
@@ -3986,11 +3625,11 @@ def populate_template_from_json(
         json_path: Path to structured JSON file or FMP raw JSON file
         template_path: Path to Excel template file
         output_path: Path where populated template will be saved
-        target_sheets: List of sheet names to populate (default: ["DCF Base", "3 Statement"])
+        target_sheets: List of sheet names to populate (default: ["DCF A", "3 Statement"])
         assumptions_path: Optional path to assumptions JSON file for 3-statement model
     """
     if target_sheets is None:
-        target_sheets = ["DCF Base"]
+        target_sheets = ["DCF A"]
     
     if not OPENPYXL_AVAILABLE:
         raise ImportError("openpyxl is required for reading Excel templates. Install with: pip install openpyxl")
@@ -4114,9 +3753,8 @@ def populate_template_from_json(
     if assumptions_path:
         logger.info(f"Loading assumptions from {assumptions_path}")
         try:
-            raw_assumptions = load_structured_json(assumptions_path)
-            assumptions_data = convert_assumptions_to_legacy_format(raw_assumptions)
-            logger.info("Assumptions loaded and converted successfully")
+            assumptions_data = load_structured_json(assumptions_path)
+            logger.info("Assumptions loaded successfully")
         except Exception as e:
             logger.warning(f"Failed to load assumptions: {e}")
     
@@ -4132,9 +3770,9 @@ def populate_template_from_json(
         # Add model_role column
         add_model_role_column(worksheet, role_column="ZZ")
         
-        # For 3 Statement sheet, detect Year"A" placeholders like DCF sheets
+        # For 3 Statement sheet, use fixed column positions (D, E, F for historical)
         if sheet_name == "3 Statement":
-            logger.info("Processing 3 Statement sheet")
+            logger.info("Processing 3 Statement sheet with fixed positions")
             
             # Set sheet title: "Company Name 3 Statement Model (UNITS)"
             if company_name:
@@ -4143,42 +3781,24 @@ def populate_template_from_json(
                 title_cell.font = Font(bold=True, size=14)
                 logger.info(f"Set sheet title to: {company_name} 3 Statement Model (UNITS)")
             
-            # Detect historical columns from Income Statement row 4 (where Year"A" placeholders are)
-            # Check row 4 for Year"A" placeholders (Income Statement header row)
-            hist_columns = []
-            for col_idx in range(4, 12):  # Columns D through K
-                cell = worksheet.cell(row=4, column=col_idx)
-                cell_value = str(cell.value or "").strip().lower()
-                # Check for Year"A" patterns
-                if "year" in cell_value and ("\"a\"" in cell_value or "'a'" in cell_value or " a" in cell_value):
-                    hist_columns.append(col_idx)
-            
-            # If not found in row 4, try row 16 as fallback
-            if not hist_columns:
-                hist_columns = detect_historical_columns(worksheet)
-            
-            # If still not found, use default columns D, E, F
-            if not hist_columns:
-                logger.info("No Year\"A\" placeholders found in 3 Statement sheet, using default columns D, E, F")
-                hist_columns = [4, 5, 6]
-            
-            logger.info(f"Using historical columns for 3 Statement: {hist_columns}")
+            # Use fixed historical columns: D(4), E(5), F(6)
+            hist_columns = [4, 5, 6]
+            logger.info(f"Using fixed historical columns for 3 Statement: {hist_columns}")
             
             # Map years to columns
             year_column_map = map_years_to_columns(years_list, hist_columns)
             logger.info(f"Mapped years to columns: {year_column_map}")
             
             # Populate year headers for all three statements
-            # Income Statement (row 4), Balance Sheet (row 24), Cash Flow (row 69)
-            # This function handles Year"A" and Year"E" placeholders
+            # Income Statement (row 4), Balance Sheet (row 24), Cash Flow (row 71)
             logger.info("Populating 3-statement year headers")
             populate_three_statement_year_headers(worksheet, years_list, forecast_periods=5)
         else:
-            # For other sheets (e.g., DCF Base), detect historical columns from row 16
+            # For other sheets (e.g., DCF A), detect historical columns from row 16
             hist_columns = detect_historical_columns(worksheet)
-            if not hist_columns:
-                logger.warning(f"No 'Year\"A\"' columns found in sheet '{sheet_name}'. Skipping.")
-                continue
+        if not hist_columns:
+            logger.warning(f"No 'Year\"A\"' columns found in sheet '{sheet_name}'. Skipping.")
+            continue
         
         logger.info(f"Found {len(hist_columns)} historical columns: {hist_columns}")
         
@@ -4186,11 +3806,9 @@ def populate_template_from_json(
         year_column_map = map_years_to_columns(years_list, hist_columns)
         logger.info(f"Mapped years to columns: {year_column_map}")
         
-        # For 3 Statement sheet, year headers are already populated by populate_three_statement_year_headers
-        # For other sheets (DCF Base), write year headers to row 16
-        if sheet_name != "3 Statement":
-            write_year_headers(worksheet, year_column_map, header_row=16)
-            logger.info(f"Wrote year headers to row 16: {sorted(year_column_map.keys())}")
+            # Write year headers to row 16
+        write_year_headers(worksheet, year_column_map, header_row=16)
+        logger.info(f"Wrote year headers to row 16: {sorted(year_column_map.keys())}")
         
         # Populate historicals - use dedicated function for 3 Statement sheet
         if sheet_name == "3 Statement":
@@ -4210,7 +3828,7 @@ def populate_template_from_json(
                 logger.info("Populating 3-statement assumptions")
                 populate_three_statement_assumptions(worksheet, assumptions_data, forecast_periods=5)
         else:
-            # Use generic historical population for other sheets (e.g., DCF Base)
+            # Use generic historical population for other sheets (e.g., DCF A)
             populate_historicals(worksheet, role_column="ZZ", matrix=matrix, year_column_map=year_column_map)
             logger.info(f"Populated historicals for sheet '{sheet_name}'")
     
@@ -4232,7 +3850,6 @@ def export_full_model_to_excel(
     template_path: str,
     output_path: str,
     comps_input: Optional[List[Dict[str, Any]]] = None,
-    assumptions_path: Optional[str] = None,
 ) -> None:
     """
     Main orchestration function to populate Excel template with historical data from JSON.
@@ -4244,10 +3861,8 @@ def export_full_model_to_excel(
         json_path: Path to structured JSON file
         template_path: Path to Excel template file
         output_path: Path where populated template will be saved
-        comps_input: Optional list of comparable company data for RV sheet (deprecated, use assumptions)
+        comps_input: Optional list of comparable company data for RV sheet
             Each dict should have: name, ev_ebitda, pe, ev_sales (or None)
-        assumptions_path: Optional path to assumptions JSON file containing competitors and other assumptions
-            Expected structure: {"competitors": ["TICKER1", "TICKER2", "TICKER3", "TICKER4"], ...}
     """
     if not OPENPYXL_AVAILABLE:
         raise ImportError("openpyxl is required for reading Excel templates. Install with: pip install openpyxl")
@@ -4285,7 +3900,7 @@ def export_full_model_to_excel(
     three_stmt_output = run_three_statement(
         model_input=model_input,
         assumptions=default_assumptions,
-        forecast_periods=3,
+        forecast_periods=5,
     )
     
     logger.info("Running DCF model")
@@ -4322,20 +3937,6 @@ def export_full_model_to_excel(
         shutil.copy2(template_path, output_path)
         template_path = output_path  # Work on the copy
     
-    # Step 3.5: Load assumptions if provided
-    assumptions_data = None
-    if assumptions_path:
-        logger.info(f"Loading assumptions from {assumptions_path}")
-        try:
-            raw_assumptions = load_structured_json(assumptions_path)
-            assumptions_data = convert_assumptions_to_legacy_format(raw_assumptions)
-            logger.info("Assumptions loaded and converted successfully")
-            competitors = assumptions_data.get("competitors")
-            if competitors:
-                logger.info(f"Found {len(competitors)} competitors in assumptions: {competitors}")
-        except Exception as e:
-            logger.warning(f"Failed to load assumptions: {e}")
-    
     # Step 4: Load Excel template (now working on copy)
     logger.info(f"Loading Excel template from {template_path}")
     workbook = load_excel_template(template_path)
@@ -4344,39 +3945,14 @@ def export_full_model_to_excel(
     logger.info("Populating cover sheet and summary sheet")
     # Use fake pricing for dummy/test data
     use_fake_pricing = model_input.ticker.upper() in ["DUMMY", "TEST", "FAKE"]
-    # Extract quote data if available
-    quote_data = json_data.get("quote")
-    populate_cover_sheet(
-        workbook, 
-        model_input.name, 
-        model_input.ticker, 
-        use_fake_pricing=use_fake_pricing,
-        quote_data=quote_data
-    )
+    populate_cover_sheet(workbook, model_input.name, model_input.ticker, use_fake_pricing=use_fake_pricing)
     
     # Step 4.5: Populate DCF year headers for all DCF sheets
     logger.info("Populating DCF year headers")
-    populate_dcf_year_headers(workbook, years_list, forecast_periods=3)
+    populate_dcf_year_headers(workbook, years_list, forecast_periods=5)
     
-    # Step 4.6: Populate DCF sheet titles (B2) for all DCF sheets
-    logger.info("Populating DCF sheet titles")
-    dcf_sheets = ["DCF Base", "DCF Bear", "DCF Bull"]
-    for sheet_name in dcf_sheets:
-        if sheet_name in workbook.sheetnames:
-            worksheet = workbook[sheet_name]
-            title_cell = worksheet.cell(row=2, column=2)  # Cell B2
-            title_cell.value = f"{model_input.name} DCF Analysis"
-            logger.debug(f"Wrote '{model_input.name} DCF Analysis' to {sheet_name} B2")
-        else:
-            logger.debug(f"DCF sheet '{sheet_name}' not found, skipping B2 population")
-    
-    # Step 4.7: Extract line items from JSON for 3-statement sheet
-    logger.info("Extracting line items from JSON")
-    line_items = extract_line_items_from_json(json_data)
-    logger.info(f"Extracted {len(line_items)} line items")
-    
-    # Step 5: Process DCF Base, DCF Bear, DCF Bull, and 3 Statement sheets
-    target_sheets = ["DCF Base", "DCF Bear", "DCF Bull", "3 Statement"]
+    # Step 5: Process DCF A and 3 Statement sheets
+    target_sheets = ["DCF A", "3 Statement"]
     for sheet_name in target_sheets:
         if sheet_name not in workbook.sheetnames:
             logger.warning(f"Sheet '{sheet_name}' not found in template. Skipping.")
@@ -4385,147 +3961,44 @@ def export_full_model_to_excel(
         logger.info(f"Processing sheet: {sheet_name}")
         worksheet = workbook[sheet_name]
         
-        # Handle 3 Statement sheet differently from DCF Base sheet
-        if sheet_name == "3 Statement":
-            # Add model_role column for 3 Statement sheet
-            add_model_role_column(worksheet, role_column="ZZ")
-            logger.info("Processing 3 Statement sheet")
-            
-            # Set sheet title: "Company Name 3 Statement Model (millions)"
-            if model_input.name:
-                title_cell = worksheet.cell(row=2, column=2)  # Cell B2
-                title_cell.value = f"{model_input.name} 3 Statement Model (millions)"
-                if Font:
-                    title_cell.font = Font(bold=True, size=14)
-                logger.info(f"Set sheet title to: {model_input.name} 3 Statement Model (millions)")
-            
-            # Detect historical columns from Income Statement row 4 (where Year"A" placeholders are)
-            # Check row 4 for Year"A" placeholders (Income Statement header row)
-            hist_columns = []
-            for col_idx in range(4, 12):  # Columns D through K
-                cell = worksheet.cell(row=4, column=col_idx)
-                cell_value = str(cell.value or "").strip().lower()
-                # Check for Year"A" patterns
-                if "year" in cell_value and ("\"a\"" in cell_value or "'a'" in cell_value or " a" in cell_value):
-                    hist_columns.append(col_idx)
-            
-            # If not found in row 4, try row 16 as fallback
-            if not hist_columns:
-                hist_columns = detect_historical_columns(worksheet)
-            
-            # If still not found, use default columns D, E, F
-            if not hist_columns:
-                logger.info("No Year\"A\" placeholders found in 3 Statement sheet, using default columns D, E, F")
-                hist_columns = [4, 5, 6]
-            
-            logger.info(f"Using historical columns for 3 Statement: {hist_columns}")
-            
-            # Map years to columns
-            year_column_map = map_years_to_columns(years_list, hist_columns)
-            logger.info(f"Mapped years to columns: {year_column_map}")
-            
-            # Populate year headers for all three statements
-            # Income Statement (row 4), Balance Sheet (row 24), Cash Flow (row 69)
-            # This function handles Year"A" and Year"E" placeholders
-            logger.info("Populating 3-statement year headers")
-            populate_three_statement_year_headers(worksheet, years_list, forecast_periods=5)
-            
-            # Populate historicals using dedicated function for 3 Statement sheet
-            populate_three_statement_historicals(
-                worksheet, 
-                role_column="ZZ", 
-                matrix=matrix, 
-                year_column_map=year_column_map,
-                line_items=line_items
-            )
-            logger.info(f"Populated 3-statement historicals for sheet '{sheet_name}'")
-            
-            # Populate assumptions table if assumptions provided
-            if assumptions_data and assumptions_data.get("assumptions"):
-                logger.info("Populating 3-statement assumptions table")
-                populate_three_statement_assumptions_table(worksheet, assumptions_data)
-        elif sheet_name in ["DCF Base", "DCF Bear", "DCF Bull"]:
-            # For DCF sheets (Base, Bear, Bull), populate WACC and assumptions if available
-            if assumptions_data:
-                logger.info(f"Populating WACC and assumptions for {sheet_name} sheet")
-                logger.info(f"Assumptions data type: {type(assumptions_data)}, keys: {list(assumptions_data.keys()) if isinstance(assumptions_data, dict) else 'not a dict'}")
-                # Extract quote_data if available
-                quote_data_for_dcf = json_data.get("quote") or json_data.get("quote_data")
-                if isinstance(quote_data_for_dcf, str) and Path(quote_data_for_dcf).exists():
-                    try:
-                        with open(quote_data_for_dcf, "r", encoding="utf-8") as f:
-                            quote_data_for_dcf = json.load(f)
-                    except Exception as e:
-                        logger.warning(f"Failed to load quote data from file: {e}")
-                        quote_data_for_dcf = None
-                
-                populate_wacc_and_assumptions(
-                    worksheet,
-                    model_input,
-                    dcf_output,
-                    assumptions_data,
-                    quote_data=quote_data_for_dcf,
-                    json_data=json_data
-                )
-            else:
-                logger.warning(f"{sheet_name} sheet: No assumptions provided, skipping WACC/assumptions population")
-        else:
-            # For other sheets (if any), use standard DCF logic
-            # Detect historical columns (looks for "Year"A" headers)
-            hist_columns = detect_historical_columns(worksheet)
-            if not hist_columns:
-                logger.warning(f"No 'Year\"A\"' columns found in sheet '{sheet_name}'. Skipping.")
-                continue
-            
-            logger.info(f"Found {len(hist_columns)} historical columns: {hist_columns}")
-            
-            # Map years to columns
-            year_column_map = map_years_to_columns(years_list, hist_columns)
-            logger.info(f"Mapped years to columns: {year_column_map}")
-            
-            # Write year headers to row 16
-            write_year_headers(worksheet, year_column_map, header_row=16)
-            logger.info(f"Wrote year headers to row 16")
-            
-            # Populate historicals
-            populate_historicals(worksheet, role_column="ZZ", matrix=matrix, year_column_map=year_column_map)
-            logger.info(f"Populated historicals for sheet '{sheet_name}'")
+        # Add model_role column
+        add_model_role_column(worksheet, role_column="ZZ")
+        
+        # Detect historical columns (looks for "Year"A" headers)
+        hist_columns = detect_historical_columns(worksheet)
+        if not hist_columns:
+            logger.warning(f"No 'Year\"A\"' columns found in sheet '{sheet_name}'. Skipping.")
+            continue
+        
+        logger.info(f"Found {len(hist_columns)} historical columns: {hist_columns}")
+        
+        # Map years to columns
+        year_column_map = map_years_to_columns(years_list, hist_columns)
+        logger.info(f"Mapped years to columns: {year_column_map}")
+        
+        # Write year headers to row 16
+        write_year_headers(worksheet, year_column_map, header_row=16)
+        logger.info(f"Wrote year headers to row 16")
+        
+        # Populate historicals
+        populate_historicals(worksheet, role_column="ZZ", matrix=matrix, year_column_map=year_column_map)
+        logger.info(f"Populated historicals for sheet '{sheet_name}'")
+        
+        # Populate WACC and Other Assumptions if this is the DCF A sheet
+        if sheet_name == "DCF A":
+            logger.info("Populating WACC and Other Assumptions for DCF A sheet")
+            populate_wacc_and_assumptions(worksheet, model_input, dcf_output, default_assumptions)
     
-    # Step 6: Process RV sheet (subject company only)
-    if "RV" in workbook.sheetnames:
-        logger.info("Processing RV sheet (subject company)")
+    # Step 6: Process RV sheet if comps_input provided
+    if comps_input and "RV" in workbook.sheetnames:
+        logger.info("Processing RV sheet")
         worksheet = workbook["RV"]
-        # Extract quote data if available
-        quote_data = json_data.get("quote")
-        # Auto-detect FMP format
-        is_fmp_format = (
-            "income_statements" in json_data or 
-            "balance_sheets" in json_data or 
-            "cash_flow_statements" in json_data
-        )
-        populate_rv_sheet(
-            worksheet, 
-            json_data, 
-            model_input.name, 
-            is_fmp_format=is_fmp_format,
-            quote_data=quote_data,
-            assumptions=assumptions_data
-        )
-        logger.info("Populated RV sheet with subject company data")
+        _write_rv_sheet(worksheet, model_input, comps_input)
+        logger.info("Populated RV sheet")
+    elif comps_input:
+        logger.warning("RV sheet not found in template, skipping comps data")
     
-    # Step 7: Apply DCF Bear/Bull scenario formulas (if scenario assumptions are present)
-    if assumptions_data:
-        bear_scenario = assumptions_data.get("bearScenario")
-        if bear_scenario:
-            logger.info("Applying DCF Bear scenario formulas")
-            populate_dcf_scenario(workbook, bear_scenario, "DCF Bear")
-
-        bull_scenario = assumptions_data.get("bullScenario")
-        if bull_scenario:
-            logger.info("Applying DCF Bull scenario formulas")
-            populate_dcf_scenario(workbook, bull_scenario, "DCF Bull")
-
-    # Step 8: Save workbook
+    # Step 7: Save workbook
     logger.info(f"Saving populated template to {output_path}")
     workbook.save(output_path)
     logger.info("Template population complete")
@@ -4535,118 +4008,35 @@ def populate_wacc_and_assumptions(
     worksheet,
     model_input: CompanyModelInput,
     dcf_output: DcfOutput,
-    assumptions: Dict[str, Any],
-    quote_data: Optional[Dict[str, Any]] = None,
-    json_data: Optional[Dict[str, Any]] = None
+    assumptions: Dict[str, Any]
 ) -> None:
     """
-    Populate WACC calculation inputs and Other Assumptions in DCF sheets (Base, Bear, Bull).
+    Populate WACC calculation inputs and Other Assumptions in DCF A sheet.
     
-    Writes directly to specific cells (assumption-driven only):
-    Column E:
-    - Market Risk Premium: E6
-    - Risk Free Rate: E7
-    - Cost of Debt: E10 (formula-driven in template - not overwritten here)
-    - Tax Rate: E13 (formula-driven in template - not overwritten here)
-    
-    Column J:
-    - Long Term Growth Rate (LTGR): J6 (scenario-specific: base/bear/bull)
-    - Cash and Cash Equivalents: J7 (from historicals)
-    - Shares Outstanding: J8 (from assumptions, quote_data, or JSON)
-    - Current Price: J9 (from assumptions, quote_data, or JSON)
-    - Market Cap: J10 (from quote_data or calculated as shares * price)
-    
-    Also searches for labels in column B (WACC section) and column G (Other Assumptions),
-    then writes values to columns D/E and I/J respectively for other fields.
+    Searches for labels in column B (WACC section) and column G (Other Assumptions),
+    then writes values to columns D/E and I/J respectively.
     
     Args:
-        worksheet: openpyxl Worksheet object for DCF Base/Bear/Bull sheet
+        worksheet: openpyxl Worksheet object for DCF A sheet
         model_input: CompanyModelInput with historical data
         dcf_output: DcfOutput from run_dcf()
         assumptions: Dict with assumptions (wacc, tax_rate, terminal_growth_rate, etc.)
-        quote_data: Optional quote data dict with market cap, price, shares, etc.
-        json_data: Optional full JSON data for extracting additional fields
     """
-    # Verify we're working with a DCF worksheet
-    if worksheet.title not in ["DCF Base", "DCF Bear", "DCF Bull"]:
-        logger.warning(f"populate_wacc_and_assumptions called on unexpected sheet: {worksheet.title}, expected one of: DCF Base, DCF Bear, DCF Bull")
-    
-    logger.info(f"Populating DCF assumptions for {worksheet.title} sheet. Assumptions keys: {list(assumptions.keys())}")
-    logger.info(f"Worksheet title: {worksheet.title}, Max row: {worksheet.max_row}, Max col: {worksheet.max_column}")
-    
-    # Check current values in target cells for debugging
-    cell_e6_before = worksheet.cell(row=6, column=5).value
-    cell_e7_before = worksheet.cell(row=7, column=5).value
-    cell_e10_before = worksheet.cell(row=10, column=5).value
-    cell_e13_before = worksheet.cell(row=13, column=5).value
-    logger.info(f"Current cell values - E6: {cell_e6_before}, E7: {cell_e7_before}, E10: {cell_e10_before}, E13: {cell_e13_before}")
-    
-    # Write directly to specific cells for DCF assumptions (ALWAYS overwrite)
-    # Market Risk Premium: E6
-    market_risk_premium = assumptions.get("market_risk_premium")
-    if market_risk_premium is None:
-        # Try to get from dcf section
-        dcf_data = assumptions.get("dcf", {})
-        market_risk_premium = dcf_data.get("market_risk_premium")
-    
-    if market_risk_premium is not None:
-        cell_e6 = worksheet.cell(row=6, column=5)  # Column E, Row 6
-        old_value = cell_e6.value
-        cell_e6.value = float(market_risk_premium)
-        logger.info(f"Wrote Market Risk Premium = {market_risk_premium} to E6 (was: {old_value})")
-    else:
-        logger.warning("Market Risk Premium not found in assumptions")
-    
-    # Risk Free Rate: E7
-    risk_free_rate = assumptions.get("risk_free_rate")
-    if risk_free_rate is None:
-        # Try to get from dcf section
-        dcf_data = assumptions.get("dcf", {})
-        risk_free_rate = dcf_data.get("risk_free_rate")
-    
-    if risk_free_rate is not None:
-        cell_e7 = worksheet.cell(row=7, column=5)  # Column E, Row 7
-        old_value = cell_e7.value
-        cell_e7.value = float(risk_free_rate)
-        logger.info(f"Wrote Risk Free Rate = {risk_free_rate} (was: {old_value}) to E7")
-    else:
-        logger.warning("Risk Free Rate not found in assumptions")
-    
-    # Cost of Debt: E10 and Tax Rate: E13 are now formula-driven in the template.
-    # Intentionally do NOT overwrite these cells here so Excel formulas/cell
-    # references control their values based on other inputs (e.g., WACC table).
-    
-    # WACC section labels (column B) -> values go in column E (for other fields)
+    # WACC section labels (column B) -> values go in column E
     wacc_labels = {
         "beta": ("Beta", assumptions.get("beta", 1.2)),
+        "market risk premium": ("Market Risk Premium", assumptions.get("market_risk_premium", 0.06)),
+        "risk free rate": ("Risk Free Rate", assumptions.get("risk_free_rate", 0.04)),
         "cost of equity": ("Cost of Equity", None),  # Calculated, skip
         "weight of equity": ("Weight of Equity", None),  # Calculated, skip
+        "cost of debt": ("Cost of Debt", assumptions.get("cost_of_debt", 0.05)),
         "after tax cod": ("After Tax CoD", None),  # Calculated, skip
         "weight of debt": ("Weight of Debt", None),  # Calculated, skip
+        "tax rate": ("Tax Rate", assumptions.get("tax_rate", 0.21)),
         "wacc": ("WACC", assumptions.get("wacc", 0.10)),
     }
     
     # Other Assumptions labels (column G) -> values go in column J
-    # Net Debt: derive from JSON balance sheet (latest period) when available
-    net_debt_from_json = None
-    if json_data:
-        balance_sheets = json_data.get("balance_sheets", [])
-        if balance_sheets and isinstance(balance_sheets, list):
-            latest_balance = balance_sheets[0]
-            net_debt_from_json = latest_balance.get("netDebt")
-            if net_debt_from_json is None:
-                total_debt_bs = (
-                    latest_balance.get("totalDebt")
-                    or latest_balance.get("TotalDebt")
-                )
-                cash_bs = (
-                    latest_balance.get("cashAndCashEquivalents")
-                    or latest_balance.get("cash")
-                    or latest_balance.get("CashAndCashEquivalents")
-                )
-                if total_debt_bs is not None and cash_bs is not None:
-                    net_debt_from_json = total_debt_bs - cash_bs
-
     other_assumptions_labels = {
         "fiscal year end": ("Fiscal Year End", "12/31/2025"),
         "ltgr": ("LTGR", f"{assumptions.get('terminal_growth_rate', 0.025) * 100:.2f}%"),
@@ -4657,35 +4047,25 @@ def populate_wacc_and_assumptions(
         "current price": ("Current Price", None),  # Will write to row 9 explicitly
         "mkt cap": ("Mkt Cap", None),  # Calculated, skip
         "market cap": ("Mkt Cap", None),  # Alternative label
-        # Template label may still say BV debt, but we now feed it Net Debt from JSON
-        "bv debt": ("BV debt", net_debt_from_json),
-        "book value debt": ("BV debt", net_debt_from_json),
-        "net debt": ("Net Debt", net_debt_from_json),
-        # Always force Financial Units label to reflect scaled units
-        "financial units": ("Financial Units", "USD in millions"),
+        "bv debt": ("BV debt", assumptions.get("debt", None)),
+        "book value debt": ("BV debt", assumptions.get("debt", None)),
+        "financial units": ("Financial Units", "USD"),
     }
     
-    # Search for WACC labels in column B (rows 1-50) for other fields
+    # Search for WACC labels in column B (rows 1-50)
     for row_idx in range(1, min(51, worksheet.max_row + 1)):
         label_cell = worksheet.cell(row=row_idx, column=2)  # Column B
         label_value = str(label_cell.value or "").strip().lower()
         
         # Check if this matches any WACC label
         for key, (display_name, value) in wacc_labels.items():
-            if key in label_value:
-                # Special-case Financial Units: always overwrite with correct text
-                if key == "financial units":
-                    value_cell = worksheet.cell(row=row_idx, column=5)  # Column E
+            if key in label_value and value is not None:
+                # Write to column E
+                value_cell = worksheet.cell(row=row_idx, column=5)  # Column E
+                if value_cell.value is None or str(value_cell.value).strip() == "#":
                     value_cell.value = value
-                    logger.debug(f"Wrote {display_name} = {value} to row {row_idx}, column E (forced units label)")
-                    break
-                # Other WACC fields only written when we actually have a value
-                if value is not None:
-                    value_cell = worksheet.cell(row=row_idx, column=5)  # Column E
-                    if value_cell.value is None or str(value_cell.value).strip() == "#":
-                        value_cell.value = value
-                        logger.debug(f"Wrote {display_name} = {value} to row {row_idx}, column E")
-                    break
+                    logger.debug(f"Wrote {display_name} = {value} to row {row_idx}, column E")
+                break
     
     # Get latest cash and debt from historicals
     historicals = model_input.historicals.by_role
@@ -4712,17 +4092,13 @@ def populate_wacc_and_assumptions(
         # Check if this matches any Other Assumptions label
         for key, (display_name, value) in other_assumptions_labels.items():
             if key in label_value:
-                # Special handling for Cash & Equivalents and Net/BV debt
+                # Special handling for Cash & Equivalents and BV debt
                 if "cash" in key and latest_cash is not None:
                     value = latest_cash
-                elif "bv debt" in key or "book value debt" in key or "net debt" in key:
-                    # Prefer Net Debt from JSON (latest period); fall back to latest_debt
-                    MILLIONS_SCALE_LOCAL = 1_000_000
-                    if net_debt_from_json is not None:
-                        value = float(net_debt_from_json) / MILLIONS_SCALE_LOCAL
-                    elif latest_debt is not None:
-                        value = float(latest_debt) / MILLIONS_SCALE_LOCAL
-                    else:
+                elif "bv debt" in key or "book value debt" in key:
+                    if latest_debt is not None:
+                        value = latest_debt
+                    elif value is None:
                         continue  # Skip if no debt value available
                 # Skip Diluted S/O and Current Price here - will write to specific rows below
                 elif "diluted" in key or "current price" in key:
@@ -4736,994 +4112,20 @@ def populate_wacc_and_assumptions(
                         logger.debug(f"Wrote {display_name} = {value} to row {row_idx}, column J")
                 break
     
-    # Write directly to specific cells in column J (ALWAYS overwrite)
-    sheet_name = worksheet.title
+    # Explicitly write to rows 8 and 9 for Diluted S/O and Current Price
+    shares_outstanding = assumptions.get("shares_outstanding")
+    if shares_outstanding is not None:
+        cell_j8 = worksheet.cell(row=8, column=10)  # Column J, Row 8
+        if cell_j8.value is None or str(cell_j8.value).strip() == "#":
+            cell_j8.value = shares_outstanding
+            logger.debug(f"Wrote Diluted S/O = {shares_outstanding} to row 8, column J")
     
-    # Long Term Growth Rate (LTGR): J6 - manually written to ALL sheets (Base, Bear, Bull)
-    terminal_growth_rate = None
-    
-    # Try to get scenario-specific LTGR
-    if sheet_name == "DCF Base":
-        terminal_growth_rate = assumptions.get("terminal_growth_rate")
-        if terminal_growth_rate is None:
-            dcf_data = assumptions.get("dcf", {})
-            terminal_growth_rate = dcf_data.get("terminalGrowthRate") or dcf_data.get("terminal_growth_rate")
-    elif sheet_name == "DCF Bear":
-        bear_scenario = assumptions.get("bearScenario", {})
-        terminal_growth_rate = bear_scenario.get("terminalGrowthRate") or bear_scenario.get("terminal_growth_rate")
-    elif sheet_name == "DCF Bull":
-        bull_scenario = assumptions.get("bullScenario", {})
-        terminal_growth_rate = bull_scenario.get("terminalGrowthRate") or bull_scenario.get("terminal_growth_rate")
-    
-    # Default to base scenario if not found
-    if terminal_growth_rate is None:
-        terminal_growth_rate = assumptions.get("terminal_growth_rate", 0.025)
-        dcf_data = assumptions.get("dcf", {})
-        if terminal_growth_rate == 0.025:
-            terminal_growth_rate = dcf_data.get("terminalGrowthRate") or dcf_data.get("terminal_growth_rate") or 0.025
-    
-    # Convert to decimal for Excel percentage format (Excel expects 0.02 for 2%, not 2)
-    if terminal_growth_rate is not None:
-        try:
-            tgr_val = float(terminal_growth_rate)
-            # If value is > 1, assume it's already a percentage (e.g., 2 means 2%), convert to decimal (0.02)
-            # If value is <= 1, assume it's already a decimal (e.g., 0.02 means 2%), use as-is
-            if tgr_val > 1:
-                ltgr_decimal = tgr_val / 100.0  # Convert percentage to decimal for Excel
-            else:
-                ltgr_decimal = tgr_val  # Already a decimal
-            cell_j6 = worksheet.cell(row=6, column=10)  # Column J, Row 6
-            old_value = cell_j6.value
-            cell_j6.value = ltgr_decimal
-            # Set percentage format
-            cell_j6.number_format = '0.00%'
-            logger.info(f"Wrote LTGR = {ltgr_decimal} ({tgr_val}%) to J6 (was: {old_value}) for {sheet_name}")
-        except (ValueError, TypeError) as e:
-            logger.warning(f"Could not convert terminal_growth_rate '{terminal_growth_rate}' to float: {e}")
-    else:
-        logger.warning(f"LTGR not found for {sheet_name}")
-    
-    # Cash, Shares Outstanding, Current Price, Market Cap: Only write to DCF Base
-    # Bear and Bull reference Base via cell references in the template
-    if sheet_name == "DCF Base":
-        # Cash and Cash Equivalents: J7 - from historicals (scale to millions)
-        MILLIONS_SCALE = 1_000_000
-        if latest_cash is not None:
-            cell_j7 = worksheet.cell(row=7, column=10)  # Column J, Row 7
-            old_value = cell_j7.value
-            cash_scaled = float(latest_cash) / MILLIONS_SCALE
-            cell_j7.value = cash_scaled
-            logger.info(f"Wrote Cash & Equivalents = {cash_scaled}M (was: {old_value}, original: {latest_cash}) to J7")
-        else:
-            logger.warning("Cash & Equivalents not found in historicals")
-        
-        # Shares Outstanding: J8 - from assumptions, quote_data, or JSON (scale to millions)
-        shares_outstanding = assumptions.get("shares_outstanding")
-        if shares_outstanding is None and quote_data:
-            shares_outstanding = (
-                quote_data.get("sharesOutstanding") or
-                quote_data.get("shares_outstanding") or
-                quote_data.get("weightedAverageShsOutDil") or
-                quote_data.get("weightedAverageShsOut")
-            )
-        if shares_outstanding is None and json_data:
-            # Try to get from income statements
-            income_statements = json_data.get("income_statements", [])
-            if income_statements and isinstance(income_statements, list) and len(income_statements) > 0:
-                latest_income = income_statements[0]
-                shares_outstanding = (
-                    latest_income.get("weightedAverageShsOutDil") or
-                    latest_income.get("weightedAverageShsOut")
-                )
-        
-        if shares_outstanding is not None:
-            cell_j8 = worksheet.cell(row=8, column=10)  # Column J, Row 8
-            old_value = cell_j8.value
-            shares_scaled = float(shares_outstanding) / MILLIONS_SCALE
-            cell_j8.value = shares_scaled
-            logger.info(f"Wrote Shares Outstanding = {shares_scaled}M (was: {old_value}, original: {shares_outstanding}) to J8")
-        else:
-            logger.warning("Shares Outstanding not found")
-        
-        # Current Price: J9 - from assumptions, quote_data, or JSON
-        current_price = assumptions.get("current_price")
-        if current_price is None and quote_data:
-            current_price = (
-                quote_data.get("price") or
-                quote_data.get("sharePrice") or
-                quote_data.get("currentPrice") or
-                quote_data.get("regularMarketPrice")
-            )
-        if current_price is None and json_data:
-            quote_data_from_json = json_data.get("quote") or json_data.get("quote_data")
-            if isinstance(quote_data_from_json, dict):
-                current_price = (
-                    quote_data_from_json.get("price") or
-                    quote_data_from_json.get("sharePrice") or
-                    quote_data_from_json.get("currentPrice")
-                )
-        
-        if current_price is not None:
-            cell_j9 = worksheet.cell(row=9, column=10)  # Column J, Row 9
-            old_value = cell_j9.value
-            cell_j9.value = float(current_price)
-            logger.info(f"Wrote Current Price = {current_price} to J9 (was: {old_value})")
-        else:
-            logger.warning("Current Price not found")
-        
-        # Market Cap: J10 - calculate from shares * price, or get from quote_data
-        market_cap = None
-        if quote_data:
-            market_cap = (
-                quote_data.get("marketCap") or
-                quote_data.get("market_cap") or
-                quote_data.get("MarketCap")
-            )
-        if market_cap is None and json_data:
-            quote_data_from_json = json_data.get("quote") or json_data.get("quote_data")
-            if isinstance(quote_data_from_json, dict):
-                market_cap = (
-                    quote_data_from_json.get("marketCap") or
-                    quote_data_from_json.get("market_cap") or
-                    quote_data_from_json.get("MarketCap")
-                )
-        
-        # Calculate market cap if we have shares and price but not market cap
-        if market_cap is None and shares_outstanding is not None and current_price is not None:
-            market_cap = float(shares_outstanding) * float(current_price)
-            logger.info(f"Calculated Market Cap = {shares_outstanding} * {current_price} = {market_cap}")
-        
-        if market_cap is not None:
-            cell_j10 = worksheet.cell(row=10, column=10)  # Column J, Row 10
-            old_value = cell_j10.value
-            market_cap_scaled = float(market_cap) / MILLIONS_SCALE
-            cell_j10.value = market_cap_scaled
-            logger.info(f"Wrote Market Cap = {market_cap_scaled}M (was: {old_value}, original: {market_cap}) to J10")
-        else:
-            logger.warning("Market Cap not found and could not be calculated")
-        
-        # Total Debt: assign to J11 from most recent period balance sheet in JSON
-        total_debt_value = None
-        if json_data:
-            balance_sheets = json_data.get("balance_sheets", [])
-            if balance_sheets and isinstance(balance_sheets, list):
-                # Determine most recent period by 'date' or 'fiscalYear' if available
-                def _balance_sort_key(bs_row: Dict[str, Any]) -> str:
-                    # Prefer explicit date string; fall back to fiscalYear; otherwise empty
-                    return str(bs_row.get("date") or bs_row.get("fiscalYear") or "")
-
-                latest_balance = max(balance_sheets, key=_balance_sort_key)
-                total_debt_value = (
-                    latest_balance.get("totalDebt")
-                    or latest_balance.get("TotalDebt")
-                    or latest_balance.get("total_debt")
-                )
-        if total_debt_value is not None:
-            cell_j11 = worksheet.cell(row=11, column=10)  # Column J, Row 11
-            old_value = cell_j11.value
-            total_debt_scaled = float(total_debt_value) / MILLIONS_SCALE
-            cell_j11.value = total_debt_scaled
-            logger.info(
-                f"Wrote Total Debt = {total_debt_scaled}M "
-                f"(was: {old_value}, original: {total_debt_value}) to J11"
-            )
-        else:
-            logger.warning("Total Debt for J11 not found in JSON balance sheet data")
-    else:
-        # For Bear and Bull, these values are cell-referenced to Base, so skip writing
-        logger.debug(f"Skipping J7-J11 for {sheet_name} (cell-referenced to DCF Base)")
-
-def populate_dcf_scenario(
-    workbook,
-    scenario_assumptions: Dict[str, Any],
-    sheet_name: str,
-) -> None:
-    """
-    Populate DCF Bear/Bull scenario formulas based on scenario assumptions.
-
-    Args:
-        workbook: openpyxl Workbook object
-        scenario_assumptions: legacy-format scenario dict, e.g. assumptions["bearScenario"].
-        sheet_name: Name of the DCF scenario sheet (e.g., "DCF Bear" or "DCF Bull").
-    """
-    if not scenario_assumptions:
-        logger.info(f"No scenario assumptions for {sheet_name}, skipping scenario formulas.")
-        return
-
-    if sheet_name not in workbook.sheetnames:
-        logger.warning(f"Sheet {sheet_name} not found in workbook, skipping scenario formulas.")
-        return
-
-    sheet = workbook[sheet_name]
-    formula_dict = build_scenario_formula_dict()
-    apply_scenario_to_sheet(sheet, scenario_assumptions, formula_dict)
-    logger.info(f"Applied DCF scenario formulas to sheet {sheet_name}")
-
-def populate_three_statement_assumptions_table(
-    worksheet,
-    assumptions: Dict[str, Any]
-) -> None:
-    """
-    Populate assumptions tables in 3 Statement sheet.
-    
-    Income Statement Assumptions (M4-S9):
-    - Title "Assumptions" to M4
-    - Row labels to M5-M9: Revenue, Gross Margin, Operating Margin, Tax Rate, Interest Rate of Debt
-    - Types to N5-N9: step, constant, or custom
-    - Values to O5-S9: 5 period values for each assumption
-    
-<｜tool▁sep｜>new_string
-    Balance Sheet Assumptions (M25-S27):
-    - Row labels to M25-M27: Depreciation % of PPE, Inventory % Sales, Long Term Debt Change
-    - Types to N25-N27: step, constant, or custom
-    - Values to O25-S27: 5 period values for each assumption
-    
-    Cash Flow Assumptions (M70-S72):
-    - Row labels to M70-M72: Share Repurchases, Dividends as a % of Net Income, CAPEX
-    - Types to N70-N72: step, constant, or custom
-    - Values to O70-S72: 5 period values for each assumption
-    
-    Args:
-        worksheet: openpyxl Worksheet object for "3 Statement" sheet
-        assumptions: Dict containing assumptions data from JSON:
-            {
-                "assumptions": {
-                    "revenue": {"type": "step", "values": [0.05, 0.06, ...]},
-                    "gross_margin": {"type": "constant", "values": [0.40, ...]},
-                    ...
-                },
-                "balance_sheet": {
-                    "depreciation_ppe": {"type": "constant", "values": [0.10, ...]},
-                    "inventory_sales": {"type": "step", "values": [0.15, ...]},
-                    "lt_debt_change": {"type": "custom", "values": [0.05, ...]}
-                },
-                "cash_flow": {
-                    "share_repurchases": {"type": "step", "values": [1000000, ...]},
-                    "dividends_ni": {"type": "constant", "values": [0.30, ...]},
-                    "capex": {"type": "custom", "values": [5000000, ...]}
-                }
-            }
-    """
-    assumptions_data = assumptions.get("assumptions")
-    if not assumptions_data:
-        logger.warning("No assumptions data found, skipping assumptions table population")
-        return
-    
-    # Column mappings
-    COL_M = 13  # Row labels
-    COL_N = 14  # Types
-    COL_O = 15  # Period 1
-    COL_P = 16  # Period 2
-    COL_Q = 17  # Period 3
-    COL_R = 18  # Period 4
-    COL_S = 19  # Period 5
-    
-    # Row mappings
-    ROW_TITLE = 4
-    ROW_REVENUE = 5
-    ROW_GROSS_MARGIN = 6
-    ROW_OPERATING_MARGIN = 7
-    ROW_TAX_RATE = 8
-    ROW_INTEREST_RATE_DEBT = 9
-    
-    # Assumption mapping: key name -> (row, display_name)
-    assumption_map = {
-        "revenue": (ROW_REVENUE, "Revenue"),
-        "gross_margin": (ROW_GROSS_MARGIN, "Gross Margin"),
-        "operating_margin": (ROW_OPERATING_MARGIN, "Operating Margin"),
-        "tax_rate": (ROW_TAX_RATE, "Tax Rate"),
-        "interest_rate_debt": (ROW_INTEREST_RATE_DEBT, "Interest Rate of Debt"),
-    }
-    
-    # Write title to M4
-    title_cell = worksheet.cell(row=ROW_TITLE, column=COL_M)
-    if title_cell.value is None or str(title_cell.value).strip() == "":
-        title_cell.value = "Assumptions"
-        logger.debug(f"Wrote title 'Assumptions' to M{ROW_TITLE}")
-    
-    # Write row labels, types, and values
-    for key, (row_num, display_name) in assumption_map.items():
-        assumption_info = assumptions_data.get(key)
-        
-        if not assumption_info:
-            logger.debug(f"Assumption '{key}' not found in assumptions data, skipping row {row_num}")
-            continue
-        
-        # Write row label to column M
-        label_cell = worksheet.cell(row=row_num, column=COL_M)
-        if label_cell.value is None or str(label_cell.value).strip() == "":
-            label_cell.value = display_name
-            logger.debug(f"Wrote label '{display_name}' to M{row_num}")
-        
-        # Write type to column N
-        assumption_type = assumption_info.get("type")
-        if assumption_type:
-            type_cell = worksheet.cell(row=row_num, column=COL_N)
-            if type_cell.value is None or str(type_cell.value).strip() == "":
-                type_cell.value = assumption_type
-                logger.debug(f"Wrote type '{assumption_type}' to N{row_num}")
-        
-        # Write values to columns O-S (5 periods)
-        values = assumption_info.get("values", [])
-        if not values:
-            logger.warning(f"No values found for assumption '{key}', skipping values")
-            continue
-        
-        # Ensure we have exactly 5 values (pad with last value or None if needed)
-        if len(values) < 5:
-            # Pad with last value if available, otherwise None
-            last_value = values[-1] if values else None
-            values = values + [last_value] * (5 - len(values))
-            logger.debug(f"Padded values for '{key}' to 5 periods")
-        elif len(values) > 5:
-            # Use first 5 values
-            values = values[:5]
-            logger.debug(f"Truncated values for '{key}' to 5 periods")
-        
-        # Write values to columns O-S
-        value_columns = [COL_O, COL_P, COL_Q, COL_R, COL_S]
-        for col_idx, value in zip(value_columns, values):
-            if value is not None:
-                value_cell = worksheet.cell(row=row_num, column=col_idx)
-                # Write as number (float)
-                if isinstance(value, (int, float)):
-                    value_cell.value = float(value)
-                else:
-                    # Try to convert to float
-                    try:
-                        value_cell.value = float(value)
-                    except (ValueError, TypeError):
-                        logger.warning(f"Could not convert value '{value}' to float for '{key}' at column {col_idx}")
-                        continue
-                logger.debug(f"Wrote value {value} to {chr(64 + col_idx)}{row_num} for '{key}'")
-        
-        logger.info(f"Populated assumption '{display_name}' (type: {assumption_type}) with {len([v for v in values if v is not None])} values")
-    
-    logger.info("Populated 3-statement assumptions table (M4-S9)")
-    
-    # Populate Balance Sheet assumptions table (M25-S27)
-    # Note: balance_sheet is at the root level of assumptions dict, not under assumptions_data
-    bs_assumptions_data = assumptions.get("balance_sheet")
-    if bs_assumptions_data:
-        logger.info("Populating Balance Sheet assumptions table")
-        
-        # Column mappings (same as Income Statement)
-        COL_M = 13  # Row labels
-        COL_N = 14  # Types
-        COL_O = 15  # Period 1
-        COL_P = 16  # Period 2
-        COL_Q = 17  # Period 3
-        COL_R = 18  # Period 4
-        COL_S = 19  # Period 5
-        
-        # Row mappings for Balance Sheet assumptions (starting at row 25)
-        ROW_DEPRECIATION_PPE = 25
-        ROW_INVENTORY_SALES = 26
-        ROW_LT_DEBT_CHANGE = 27
-        
-        # Balance Sheet assumption mapping: key name -> (row, display_name)
-        bs_assumption_map = {
-            "depreciation_ppe": (ROW_DEPRECIATION_PPE, "Depreciation % of PPE"),
-            "inventory_sales": (ROW_INVENTORY_SALES, "Inventory % Sales"),
-            "lt_debt_change": (ROW_LT_DEBT_CHANGE, "Long Term Debt Change"),
-        }
-        
-        # Write row labels, types, and values for Balance Sheet assumptions
-        for key, (row_num, display_name) in bs_assumption_map.items():
-            assumption_info = bs_assumptions_data.get(key)
-            
-            if not assumption_info:
-                logger.debug(f"Balance Sheet assumption '{key}' not found in assumptions data, skipping row {row_num}")
-                continue
-            
-            # Write row label to column M
-            label_cell = worksheet.cell(row=row_num, column=COL_M)
-            label_cell.value = display_name
-            logger.debug(f"Wrote label '{display_name}' to M{row_num}")
-            
-            # Write type to column N
-            assumption_type = assumption_info.get("type")
-            if assumption_type:
-                type_cell = worksheet.cell(row=row_num, column=COL_N)
-                type_cell.value = assumption_type
-                logger.debug(f"Wrote type '{assumption_type}' to N{row_num}")
-            
-            # Write values to columns O-S (5 periods)
-            values = assumption_info.get("values", [])
-            if not values:
-                logger.warning(f"No values found for Balance Sheet assumption '{key}', skipping values")
-                continue
-            
-            # Ensure we have exactly 5 values (pad with last value or None if needed)
-            if len(values) < 5:
-                # Pad with last value if available, otherwise None
-                last_value = values[-1] if values else None
-                values = values + [last_value] * (5 - len(values))
-                logger.debug(f"Padded values for '{key}' to 5 periods")
-            elif len(values) > 5:
-                # Use first 5 values
-                values = values[:5]
-                logger.debug(f"Truncated values for '{key}' to 5 periods")
-            
-            # Write values to columns O-S
-            value_columns = [COL_O, COL_P, COL_Q, COL_R, COL_S]
-            for col_idx, value in zip(value_columns, values):
-                if value is not None:
-                    value_cell = worksheet.cell(row=row_num, column=col_idx)
-                    # Write as number (float)
-                    if isinstance(value, (int, float)):
-                        value_cell.value = float(value)
-                    else:
-                        # Try to convert to float
-                        try:
-                            value_cell.value = float(value)
-                        except (ValueError, TypeError):
-                            logger.warning(f"Could not convert value '{value}' to float for '{key}' at column {col_idx}")
-                            continue
-                    logger.debug(f"Wrote value {value} to {chr(64 + col_idx)}{row_num} for '{key}'")
-            
-            logger.info(f"Populated Balance Sheet assumption '{display_name}' (type: {assumption_type}) with {len([v for v in values if v is not None])} values")
-        
-        logger.info("Populated Balance Sheet assumptions table (M25-S27)")
-    else:
-        logger.debug("No Balance Sheet assumptions data found, skipping Balance Sheet assumptions table")
-    
-    # Populate Cash Flow assumptions table (M72-S74)
-    # Note: cash_flow is at the root level of assumptions dict
-    cf_assumptions_data = assumptions.get("cash_flow")
-    if cf_assumptions_data:
-        logger.info("Populating Cash Flow assumptions table")
-        
-        # Column mappings (same as Income Statement and Balance Sheet)
-        COL_M = 13  # Row labels
-        COL_N = 14  # Types
-        COL_O = 15  # Period 1
-        COL_P = 16  # Period 2
-        COL_Q = 17  # Period 3
-        COL_R = 18  # Period 4
-        COL_S = 19  # Period 5
-        
-        # Row mappings for Cash Flow assumptions
-        ROW_SHARE_REPURCHASES = 70
-        ROW_DIVIDENDS_NI = 71
-        ROW_CAPEX = 72
-        
-        # Cash Flow assumption mapping: key name -> (row, display_name)
-        cf_assumption_map = {
-            "share_repurchases": (ROW_SHARE_REPURCHASES, "Share Repurchases"),
-            "dividends_ni": (ROW_DIVIDENDS_NI, "Dividends as a % of Net Income"),
-            "capex": (ROW_CAPEX, "CAPEX"),
-        }
-        
-        # Write row labels, types, and values for Cash Flow assumptions
-        for key, (row_num, display_name) in cf_assumption_map.items():
-            assumption_info = cf_assumptions_data.get(key)
-            
-            if not assumption_info:
-                logger.debug(f"Cash Flow assumption '{key}' not found in assumptions data, skipping row {row_num}")
-                continue
-            
-            # Write row label to column M
-            label_cell = worksheet.cell(row=row_num, column=COL_M)
-            label_cell.value = display_name
-            logger.debug(f"Wrote label '{display_name}' to M{row_num}")
-            
-            # Write type to column N
-            assumption_type = assumption_info.get("type")
-            if assumption_type:
-                type_cell = worksheet.cell(row=row_num, column=COL_N)
-                type_cell.value = assumption_type
-                logger.debug(f"Wrote type '{assumption_type}' to N{row_num}")
-            
-            # Write values to columns O-S (5 periods)
-            values = assumption_info.get("values", [])
-            if not values:
-                logger.warning(f"No values found for Cash Flow assumption '{key}', skipping values")
-                continue
-            
-            # Ensure we have exactly 5 values (pad with last value or None if needed)
-            if len(values) < 5:
-                # Pad with last value if available, otherwise None
-                last_value = values[-1] if values else None
-                values = values + [last_value] * (5 - len(values))
-                logger.debug(f"Padded values for '{key}' to 5 periods")
-            elif len(values) > 5:
-                # Use first 5 values
-                values = values[:5]
-                logger.debug(f"Truncated values for '{key}' to 5 periods")
-            
-            # Write values to columns O-S
-            value_columns = [COL_O, COL_P, COL_Q, COL_R, COL_S]
-            for col_idx, value in zip(value_columns, values):
-                if value is not None:
-                    value_cell = worksheet.cell(row=row_num, column=col_idx)
-                    # Write as number (float)
-                    if isinstance(value, (int, float)):
-                        value_cell.value = float(value)
-                    else:
-                        # Try to convert to float
-                        try:
-                            value_cell.value = float(value)
-                        except (ValueError, TypeError):
-                            logger.warning(f"Could not convert value '{value}' to float for '{key}' at column {col_idx}")
-                            continue
-                    logger.debug(f"Wrote value {value} to {chr(64 + col_idx)}{row_num} for '{key}'")
-            
-            logger.info(f"Populated Cash Flow assumption '{display_name}' (type: {assumption_type}) with {len([v for v in values if v is not None])} values")
-        
-        logger.info("Populated Cash Flow assumptions table (M70-S72)")
-    else:
-        logger.debug("No Cash Flow assumptions data found, skipping Cash Flow assumptions table")
-
-
-def fetch_competitor_metrics(ticker: str) -> Optional[Dict[str, Any]]:
-    """
-    Fetch and extract competitor metrics from FMP API.
-    
-    Optimized to fetch only the minimum required data:
-    - Quote data (Market Cap, Share Price) - single API call
-    - Income Statement (Sales, EPS, Shares Outstanding) - limit=1 (latest period only)
-    - Balance Sheet (Book Value, Net Debt) - limit=1 (latest period only)
-    
-    Does NOT fetch Cash Flow Statement (not needed for competitor metrics).
-    
-    Extracts the same metrics as subject company:
-    - Market Cap (from quote)
-    - Share Price (from quote)
-    - Sales/Revenue (from income statement)
-    - Enterprise Value (calculated: Market Cap + Net Debt)
-    - Net Debt (from balance sheet or calculated)
-    - EPS (from income statement)
-    - Book Value (from balance sheet)
-    - Shares Outstanding (from income statement)
-    
-    Args:
-        ticker: Competitor ticker symbol (e.g., "AAPL")
-        
-    Returns:
-        Dictionary with metrics or None if data unavailable
-        {
-            "market_cap": float,
-            "share_price": float,
-            "sales": float,
-            "enterprise_value": float,
-            "net_debt": float,
-            "eps": float,
-            "book_value": float,
-            "shares_outstanding": float,
-            "company_name": str
-        }
-    """
-    from app.data.fmp_client import fetch_quote, fetch_income_statement, fetch_balance_sheet
-    
-    try:
-        logger.info(f"Fetching competitor data for {ticker} (optimized: quote + IS + BS only)")
-        metrics = {}
-        company_name = ticker
-        
-        # Fetch quote data (Market Cap, Share Price)
-        try:
-            quote_data = fetch_quote(ticker.upper())
-            metrics["market_cap"] = quote_data.get("marketCap")
-            metrics["share_price"] = quote_data.get("price")
-            logger.debug(f"Fetched quote data for {ticker}: marketCap={metrics.get('market_cap')}, price={metrics.get('share_price')}")
-        except Exception as e:
-            logger.warning(f"Error fetching quote data for {ticker}: {e}")
-        
-        # Fetch income statement (Sales, EPS, Shares Outstanding) - only latest period
-        try:
-            income_data = fetch_income_statement(ticker.upper(), limit=1)
-            if income_data and isinstance(income_data, list) and len(income_data) > 0:
-                latest_income = income_data[0]
-                company_name = latest_income.get("companyName", ticker)
-                
-                # Extract income statement metrics
-                metrics["sales"] = latest_income.get("revenue")
-                metrics["eps"] = latest_income.get("epsDiluted") or latest_income.get("eps")
-                metrics["shares_outstanding"] = (
-                    latest_income.get("weightedAverageShsOutDil") or 
-                    latest_income.get("weightedAverageShsOut")
-                )
-                logger.debug(f"Fetched income statement for {ticker}: revenue={metrics.get('sales')}, eps={metrics.get('eps')}")
-        except Exception as e:
-            logger.warning(f"Error fetching income statement for {ticker}: {e}")
-        
-        # Fetch balance sheet (Book Value, Net Debt) - only latest period
-        try:
-            balance_data = fetch_balance_sheet(ticker.upper(), limit=1)
-            if balance_data and isinstance(balance_data, list) and len(balance_data) > 0:
-                latest_balance = balance_data[0]
-                
-                # Book Value
-                metrics["book_value"] = (
-                    latest_balance.get("totalStockholdersEquity") or 
-                    latest_balance.get("totalEquity")
-                )
-                
-                # Net Debt
-                metrics["net_debt"] = latest_balance.get("netDebt")
-                if metrics["net_debt"] is None:
-                    total_debt = latest_balance.get("totalDebt")
-                    cash = latest_balance.get("cashAndCashEquivalents")
-                    if total_debt is not None and cash is not None:
-                        metrics["net_debt"] = total_debt - cash
-                logger.debug(f"Fetched balance sheet for {ticker}: bookValue={metrics.get('book_value')}, netDebt={metrics.get('net_debt')}")
-        except Exception as e:
-            logger.warning(f"Error fetching balance sheet for {ticker}: {e}")
-        
-        # Calculate Enterprise Value
-        if metrics.get("market_cap") is not None and metrics.get("net_debt") is not None:
-            metrics["enterprise_value"] = metrics["market_cap"] + metrics["net_debt"]
-        
-        metrics["company_name"] = company_name
-        
-        logger.info(f"Successfully extracted metrics for {ticker}: {list(metrics.keys())}")
-        return metrics
-        
-    except Exception as e:
-        logger.warning(f"Error fetching competitor metrics for {ticker}: {e}")
-        return None
-
-
-def populate_competitor_data(
-    worksheet,
-    competitors: List[str]
-) -> None:
-    """
-    Populate competitor data in RV sheet.
-    
-    Writes competitor names to paired rows (B6/B17, B7/B18, B8/B19, B9/B20)
-    and metrics to rows 17-20, columns D-K.
-    
-    Args:
-        worksheet: openpyxl Worksheet object for RV sheet
-        competitors: List of 4 competitor ticker symbols
-    """
-    MILLIONS_SCALE = 1_000_000
-    
-    # Competitor name rows (paired)
-    name_rows_upper = [6, 7, 8, 9]  # B6-B9
-    name_rows_lower = [17, 18, 19, 20]  # B17-B20
-    
-    # Metrics rows (same as lower name rows)
-    metrics_rows = [17, 18, 19, 20]
-    
-    metric_order = [
-        ("market_cap", 4, True),      # D - Market Cap - scale to millions
-        ("share_price", 5, False),    # E - Share Price - keep as-is (dollars)
-        ("sales", 6, True),           # F - Sales (Revenue) - scale to millions
-        ("enterprise_value", 7, True), # G - Enterprise Value - scale to millions
-        ("net_debt", 8, True),        # H - Net Debt - scale to millions
-        ("eps", 9, False),            # I - EPS - keep as-is (dollars per share)
-        ("book_value", 10, True),      # J - Book Value - scale to millions
-        ("shares_outstanding", 11, False), # K - Shares Outstanding - keep as-is (shares)
-    ]
-    
-    for idx, ticker in enumerate(competitors):
-        if idx >= 4:
-            break  # Only handle first 4 competitors
-        
-        # Fetch competitor metrics
-        competitor_metrics = fetch_competitor_metrics(ticker)
-        
-        if not competitor_metrics:
-            logger.warning(f"Skipping competitor {ticker} - failed to fetch metrics")
-            continue
-        
-        company_name = competitor_metrics.get("company_name", ticker)
-        
-        # Write competitor name to paired rows
-        if idx < len(name_rows_upper):
-            # Upper row (B6-B9)
-            worksheet.cell(row=name_rows_upper[idx], column=2).value = company_name
-            logger.debug(f"Wrote competitor {idx+1} name '{company_name}' to B{name_rows_upper[idx]}")
-        
-        if idx < len(name_rows_lower):
-            # Lower row (B17-B20)
-            worksheet.cell(row=name_rows_lower[idx], column=2).value = company_name
-            logger.debug(f"Wrote competitor {idx+1} name '{company_name}' to B{name_rows_lower[idx]}")
-        
-        # Write metrics to row 17-20, columns D-K
-        if idx < len(metrics_rows):
-            target_row = metrics_rows[idx]
-            for metric_key, column, scale_to_millions in metric_order:
-                value = competitor_metrics.get(metric_key)
-                if value is not None:
-                    cell = worksheet.cell(row=target_row, column=column)
-                    if scale_to_millions:
-                        cell.value = float(value) / MILLIONS_SCALE
-                    else:
-                        cell.value = float(value)
-                    cell.number_format = "General"
-                    logger.debug(f"Wrote competitor {idx+1} {metric_key} = {value} {'(scaled to millions)' if scale_to_millions else ''} to row {target_row}, column {column}")
-                else:
-                    logger.debug(f"No value found for competitor {idx+1} {metric_key}, skipping")
-            
-            logger.info(f"Populated competitor {idx+1} ({ticker}) metrics to row {target_row}")
-
-
-def populate_rv_sheet(
-    worksheet,
-    json_data: Dict[str, Any],
-    company_name: str,
-    is_fmp_format: bool = False,
-    quote_data: Optional[Dict[str, Any]] = None,
-    assumptions: Optional[Dict[str, Any]] = None
-) -> None:
-    """
-    Populate RV (Relative Valuation) sheet with company name and key metrics.
-    
-    Writes:
-    - Company name to cells B5, B13, B16
-    - Metrics to columns D-K in row 16 only: Market Cap | Share Price | Sales (Revenue) | Enterprise Value | Net Debt | EPS | Book Value | Shares Outstanding
-    - Competitor names to B6-B9 and B17-B20 (paired rows)
-    - Competitor metrics to rows 17-20, columns D-K
-    
-    Args:
-        worksheet: openpyxl Worksheet object for RV sheet
-        json_data: JSON data containing financial statements
-        company_name: Company name string
-        is_fmp_format: Whether JSON is in FMP format
-        quote_data: Optional quote/price data dictionary
-        assumptions: Optional assumptions dictionary containing competitors list: {"competitors": ["TICKER1", "TICKER2", "TICKER3", "TICKER4"]}
-    """
-    if not company_name:
-        logger.warning("No company name provided, skipping RV sheet population")
-        return
-    
-    # Write company name to B2: "Company Name Relative Valuation"
-    title_cell = worksheet.cell(row=2, column=2)  # Cell B2
-    title_cell.value = f"{company_name} Relative Valuation"
-    logger.debug(f"Wrote '{company_name} Relative Valuation' to RV Sheet B2")
-    
-    # Write company name to B5, B13, B16
-    worksheet.cell(row=5, column=2).value = company_name  # B5
-    worksheet.cell(row=13, column=2).value = company_name  # B13
-    worksheet.cell(row=16, column=2).value = company_name  # B16
-    logger.info(f"Wrote company name '{company_name}' to B5, B13, B16")
-    
-    # Extract metrics from JSON data
-    metrics = {}
-    
-    # Get quote data if not provided (try regardless of format)
-    if not quote_data:
-        quote_data = json_data.get("quote") or json_data.get("quote_data")
-        # If quote is a file path string, try to load it
-        if isinstance(quote_data, str) and Path(quote_data).exists():
-            try:
-                with open(quote_data, "r", encoding="utf-8") as f:
-                    quote_data = json.load(f)
-                logger.debug(f"Loaded quote data from file")
-            except Exception as e:
-                logger.warning(f"Failed to load quote data from file: {e}")
-                quote_data = None
-        elif quote_data:
-            logger.debug(f"Found quote data in JSON")
-    
-    # Extract from quote data
-    if quote_data:
-        # Try multiple field name variations for market cap
-        metrics["market_cap"] = (
-            quote_data.get("marketCap") or
-            quote_data.get("market_cap") or
-            quote_data.get("MarketCap") or
-            quote_data.get("mktCap")
-        )
-        # Try multiple field name variations for share price
-        metrics["share_price"] = (
-            quote_data.get("price") or
-            quote_data.get("sharePrice") or
-            quote_data.get("SharePrice") or
-            quote_data.get("currentPrice")
-        )
-        if metrics["market_cap"]:
-            logger.debug(f"Found market cap: {metrics['market_cap']}")
-        if metrics["share_price"]:
-            logger.debug(f"Found share price: {metrics['share_price']}")
-    
-    # Auto-detect FMP format if JSON has FMP structure
-    has_fmp_structure = (
-        "income_statements" in json_data or 
-        "balance_sheets" in json_data or 
-        "cash_flow_statements" in json_data
-    )
-    if has_fmp_structure:
-        is_fmp_format = True
-        logger.debug("Auto-detected FMP format from JSON structure")
-    
-    # Extract from income statement (most recent period)
-    income_statements = []
-    if is_fmp_format:
-        income_statements = json_data.get("income_statements", [])
-        logger.debug(f"Found {len(income_statements)} income statements in FMP format")
-    else:
-        # Structured format - use extract_line_items_from_json to handle all formats
-        line_items = extract_line_items_from_json(json_data)
-        # Group by statement type and find latest period
-        income_items = [item for item in line_items if item.get("statement") == "income_statement"]
-        
-        # Get latest period from income statement items
-        if income_items:
-            # Find all periods across income statement items
-            all_periods = set()
-            for item in income_items:
-                periods = item.get("periods", {})
-                all_periods.update(periods.keys())
-            
-            if all_periods:
-                # Get latest period (most recent date)
-                latest_period = max(all_periods)
-                
-                # Build latest income statement from line items
-                latest_income = {}
-                for item in income_items:
-                    periods = item.get("periods", {})
-                    if latest_period in periods:
-                        tag = item.get("tag", "")
-                        value = periods[latest_period]
-                        latest_income[tag] = value
-                
-                income_statements = [latest_income]
-    
-    if income_statements and len(income_statements) > 0:
-        latest_income = income_statements[0]  # Most recent is first
-        logger.debug(f"Extracting metrics from income statement dated: {latest_income.get('date', 'unknown')}")
-        
-        # Sales (Revenue) - try multiple field names
-        metrics["sales"] = (
-            latest_income.get("revenue") or 
-            latest_income.get("Revenue") or
-            latest_income.get("totalRevenue")
-        )
-        if metrics["sales"]:
-            logger.debug(f"Found revenue: {metrics['sales']}")
-        
-        # EPS (prefer diluted)
-        metrics["eps"] = latest_income.get("epsDiluted") or latest_income.get("eps") or latest_income.get("EPS")
-        if metrics["eps"]:
-            logger.debug(f"Found EPS: {metrics['eps']}")
-        
-        # Shares Outstanding (prefer diluted)
-        metrics["shares_outstanding"] = (
-            latest_income.get("weightedAverageShsOutDil") or 
-            latest_income.get("weightedAverageShsOut") or
-            latest_income.get("sharesOutstanding")
-        )
-        if metrics["shares_outstanding"]:
-            logger.debug(f"Found shares outstanding: {metrics['shares_outstanding']}")
-    
-    # Extract from balance sheet (most recent period)
-    balance_sheets = []
-    if is_fmp_format:
-        balance_sheets = json_data.get("balance_sheets", [])
-        logger.debug(f"Found {len(balance_sheets)} balance sheets in FMP format")
-    else:
-        # Structured format - use extract_line_items_from_json to handle all formats
-        line_items = extract_line_items_from_json(json_data)
-        # Group by statement type and find latest period
-        balance_items = [item for item in line_items if item.get("statement") == "balance_sheet"]
-        
-        # Get latest period from balance sheet items
-        if balance_items:
-            # Find all periods across balance sheet items
-            all_periods = set()
-            for item in balance_items:
-                periods = item.get("periods", {})
-                all_periods.update(periods.keys())
-            
-            if all_periods:
-                # Get latest period (most recent date)
-                latest_period = max(all_periods)
-                
-                # Build latest balance sheet from line items
-                latest_balance = {}
-                for item in balance_items:
-                    periods = item.get("periods", {})
-                    if latest_period in periods:
-                        tag = item.get("tag", "")
-                        value = periods[latest_period]
-                        latest_balance[tag] = value
-                
-                balance_sheets = [latest_balance]
-    
-    if balance_sheets and len(balance_sheets) > 0:
-        latest_balance = balance_sheets[0]  # Most recent is first
-        logger.debug(f"Extracting metrics from balance sheet dated: {latest_balance.get('date', 'unknown')}")
-        
-        # Book Value (Total Equity) - try multiple field names
-        metrics["book_value"] = (
-            latest_balance.get("totalStockholdersEquity") or 
-            latest_balance.get("totalEquity") or
-            latest_balance.get("TotalStockholdersEquity") or
-            latest_balance.get("TotalEquity")
-        )
-        if metrics["book_value"]:
-            logger.debug(f"Found book value: {metrics['book_value']}")
-        
-        # Net Debt - check if already calculated, otherwise calculate from Total Debt - Cash
-        metrics["net_debt"] = latest_balance.get("netDebt")  # FMP format may have this pre-calculated
-        
-        if metrics["net_debt"] is None:
-            # Calculate Net Debt = Total Debt - Cash
-            total_debt = (
-                latest_balance.get("totalDebt") or 
-                latest_balance.get("TotalDebt") or
-                latest_balance.get("totalLiabilities")
-            )
-            cash = (
-                latest_balance.get("cashAndCashEquivalents") or 
-                latest_balance.get("CashAndCashEquivalents") or
-                latest_balance.get("cash") or
-                latest_balance.get("Cash")
-            )
-            if total_debt is not None and cash is not None:
-                metrics["net_debt"] = total_debt - cash
-                logger.debug(f"Calculated net debt: {total_debt} - {cash} = {metrics['net_debt']}")
-        else:
-            logger.debug(f"Found net debt (pre-calculated): {metrics['net_debt']}")
-        
-        # Enterprise Value = Market Cap + Net Debt
-        # (or Market Cap + Total Debt - Cash if net_debt not available)
-        if metrics.get("market_cap") is not None:
-            if metrics.get("net_debt") is not None:
-                metrics["enterprise_value"] = metrics["market_cap"] + metrics["net_debt"]
-                logger.debug(f"Calculated enterprise value: {metrics['market_cap']} + {metrics['net_debt']} = {metrics['enterprise_value']}")
-            else:
-                total_debt = latest_balance.get("totalDebt")
-                cash = latest_balance.get("cashAndCashEquivalents")
-                if total_debt is not None and cash is not None:
-                    metrics["enterprise_value"] = metrics["market_cap"] + total_debt - cash
-                    logger.debug(f"Calculated enterprise value: {metrics['market_cap']} + {total_debt} - {cash} = {metrics['enterprise_value']}")
-    
-    # Write metrics to columns D-K (columns 4-11) for row 16 only
-    # Order: Market Cap | Share Price | Sales (Revenue) | Enterprise Value | Net Debt | EPS | Book Value | Shares Outstanding
-    # Scale to millions where appropriate (Market Cap, Sales, Enterprise Value, Net Debt, Book Value)
-    # Keep as-is: Share Price, EPS, Shares Outstanding
-    MILLIONS_SCALE = 1_000_000
-    
-    metric_order = [
-        ("market_cap", 4, True),      # D - Market Cap - scale to millions
-        ("share_price", 5, False),    # E - Share Price - keep as-is (dollars)
-        ("sales", 6, True),           # F - Sales (Revenue) - scale to millions
-        ("enterprise_value", 7, True), # G - Enterprise Value - scale to millions
-        ("net_debt", 8, True),        # H - Net Debt - scale to millions
-        ("eps", 9, False),            # I - EPS - keep as-is (dollars per share)
-        ("book_value", 10, True),      # J - Book Value - scale to millions
-        ("shares_outstanding", 11, False), # K - Shares Outstanding - keep as-is (shares)
-    ]
-    
-    # Write metrics to row 16 only
-    target_row = 16
-    
-    for metric_key, column, scale_to_millions in metric_order:
-        value = metrics.get(metric_key)
-        if value is not None:
-            cell = worksheet.cell(row=target_row, column=column)
-            if scale_to_millions:
-                cell.value = float(value) / MILLIONS_SCALE
-            else:
-                cell.value = float(value)
-            cell.number_format = "General"
-            logger.debug(f"Wrote {metric_key} = {value} {'(scaled to millions)' if scale_to_millions else ''} to row {target_row}, column {column}")
-        else:
-            logger.debug(f"No value found for {metric_key}, skipping")
-    
-    logger.info(f"Populated RV sheet metrics to row {target_row}: {list(metrics.keys())}")
-    
-    # Step 2: Populate competitor data if provided in assumptions
-    if assumptions:
-        competitors = assumptions.get("competitors")
-        if competitors and isinstance(competitors, list):
-            if len(competitors) > 4:
-                logger.warning(f"More than 4 competitors provided ({len(competitors)}), using first 4")
-                competitors = competitors[:4]
-            elif len(competitors) < 4:
-                logger.warning(f"Less than 4 competitors provided ({len(competitors)}), will populate available competitors")
-            
-            logger.info(f"Populating competitor data for {len(competitors)} competitors")
-            populate_competitor_data(worksheet, competitors)
-        elif competitors:
-            logger.warning(f"Competitors in assumptions is not a list: {type(competitors)}")
+    current_price = assumptions.get("current_price")
+    if current_price is not None:
+        cell_j9 = worksheet.cell(row=9, column=10)  # Column J, Row 9
+        if cell_j9.value is None or str(cell_j9.value).strip() == "#":
+            cell_j9.value = current_price
+            logger.debug(f"Wrote Current Price = {current_price} to row 9, column J")
 
 
 def _write_rv_sheet(
@@ -5767,34 +4169,19 @@ def _write_rv_sheet(
     # Typically comps are in rows starting around row 5-10, with columns for Name, EV/EBITDA, P/E, EV/Sales
     
     # Find where to write comps (look for header row)
-    # Try multiple search patterns for comps table
     comps_start_row = None
-    search_patterns = ["comparable", "comp", "peer", "company", "name"]
-    
-    for row_idx in range(1, min(30, worksheet.max_row + 1)):
+    for row_idx in range(1, min(20, worksheet.max_row + 1)):
         row = worksheet[row_idx]
         for cell in row:
-            if cell.value:
-                cell_value_lower = str(cell.value).lower()
-                # Check if cell contains any of the search patterns
-                if any(pattern in cell_value_lower for pattern in search_patterns):
-                    # Check if this looks like a header row (has multiple headers or is near other headers)
-                    # Look for common comps headers: Name, EV/EBITDA, P/E, EV/Sales
-                    header_indicators = ["ev", "ebitda", "p/e", "pe", "sales", "multiple"]
-                    if any(indicator in cell_value_lower for indicator in header_indicators):
-                        comps_start_row = row_idx + 1
-                        break
-                    # Or if it's just "comparable" or "comp", use the next row
-                    elif "comparable" in cell_value_lower or ("comp" in cell_value_lower and len(cell_value_lower) < 15):
-                        comps_start_row = row_idx + 1
-                        break
+            if cell.value and "comparable" in str(cell.value).lower():
+                comps_start_row = row_idx + 1
+                break
         if comps_start_row:
             break
     
-    # If still not found, try a default location (row 5 is common for comps tables)
     if not comps_start_row:
-        logger.debug("Could not find comps table header in RV sheet, using default row 5")
-        comps_start_row = 5
+        logger.warning("Could not find comps table location in RV sheet")
+        return
     
     # Write comps data
     for idx, comp in enumerate(comps_input):

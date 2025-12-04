@@ -21,21 +21,10 @@ from app.data.fmp_client import (
     fetch_income_statement,
     fetch_quote,
 )
-# Conditional imports - only needed for IngestOrchestrator class, not for fetch_fmp_stable_raw_data
-try:
-    from app.models.company import Company
-except ImportError:
-    Company = None  # type: ignore
-
-try:
-    from app.services.ingestion.repositories import XbrlRepository
-except ImportError:
-    XbrlRepository = None  # type: ignore
-
-try:
-    from app.services.ingestion.pipelines import SP500IngestionPipeline
-except ImportError:
-    SP500IngestionPipeline = None  # type: ignore
+from app.models.company import Company
+# TODO: Re-enable when pipelines and repositories modules are created
+# from app.services.ingestion.pipelines import SP500IngestionPipeline
+# from app.services.ingestion.repositories import XbrlRepository
 
 
 logger = get_logger(__name__)
@@ -47,33 +36,21 @@ class IngestOrchestrator:
     """
 
     def __init__(self, db: Session) -> None:
-        if Company is None:
-            raise ImportError(
-                "Company model is not available. "
-                "This class requires the models module to be properly configured."
-            )
-        if XbrlRepository is None:
-            raise ImportError(
-                "XbrlRepository is not available. "
-                "This class requires the repositories module to be properly configured."
-            )
-        if SP500IngestionPipeline is None:
-            raise ImportError(
-                "SP500IngestionPipeline is not available. "
-                "This class requires the pipelines module to be properly configured."
-            )
         self._db = db
-        repository = XbrlRepository()  # Uses default db_client from get_db_client()
-        self._pipeline = SP500IngestionPipeline(repository=repository)
+        # TODO: Re-enable when pipelines and repositories modules are created
+        # repository = XbrlRepository()  # Uses default db_client from get_db_client()
+        # self._pipeline = SP500IngestionPipeline(repository=repository)
+        self._pipeline = None  # Placeholder until pipeline is implemented
 
     # ------------------------------------------------------------------ #
     def run_sp500_backfill(self, years: int = 5) -> Dict[str, Any]:
-        logger.info("Starting S&P 500 backfill for %s years.", years)
-        result = self._pipeline.ingest_all(years=years)
-        logger.info("S&P 500 backfill complete: %s successes, %s errors.", result.get("succeeded", 0), len(result.get("errors", [])))
-        return result
+        # TODO: Re-enable when pipeline is implemented
+        logger.warning("S&P 500 backfill not implemented - pipeline module missing")
+        return {"error": "not_implemented", "message": "Pipeline module not available"}
 
     def prepare_company(self, company_id: int, years: int = 5) -> Dict[str, Any]:
+        # TODO: Re-enable when pipeline is implemented
+        logger.warning("prepare_company not fully implemented - pipeline module missing")
         try:
             company = self._db.query(Company).filter(Company.id == company_id).first()
             if not company:
@@ -84,25 +61,29 @@ class IngestOrchestrator:
                 logger.warning("Company missing CIK: %s", company.ticker)
                 return {"error": "cik_missing"}
 
-            try:
-                cik_int = int(company.cik)
-            except ValueError as exc:
-                logger.error("Invalid CIK stored for company %s: %s", company.ticker, company.cik)
-                raise RuntimeError("Invalid company CIK") from exc
-
-            logger.info("Preparing data for company %s (CIK %s)", company.ticker, company.cik)
-
-            ingestion_result = self._pipeline.ingest_single(
-                ticker=company.ticker,
-                cik=cik_int,
-                years=years,
-                company_id=company.id,
-            )
+            # TODO: Re-enable pipeline ingestion when module is available
+            # if self._pipeline:
+            #     try:
+            #         cik_int = int(company.cik)
+            #         ingestion_result = self._pipeline.ingest_single(
+            #             ticker=company.ticker,
+            #             cik=cik_int,
+            #             years=years,
+            #             company_id=company.id,
+            #         )
+            #         return {
+            #             "company": company.ticker,
+            #             "status": "success",
+            #             "ingestion": ingestion_result,
+            #         }
+            #     except Exception as exc:
+            #         logger.exception("Error in pipeline ingestion: %s", exc)
+            #         raise
 
             return {
                 "company": company.ticker,
-                "status": "success",
-                "ingestion": ingestion_result,
+                "status": "partial",
+                "message": "Pipeline not available - company found but ingestion not performed",
             }
 
         except Exception as exc:  # pylint: disable=broad-except
