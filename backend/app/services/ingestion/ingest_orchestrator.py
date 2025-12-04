@@ -21,9 +21,21 @@ from app.data.fmp_client import (
     fetch_income_statement,
     fetch_quote,
 )
-from app.models.company import Company
-from app.services.ingestion.pipelines import SP500IngestionPipeline
-from app.services.ingestion.repositories import XbrlRepository
+# Conditional imports - only needed for IngestOrchestrator class, not for fetch_fmp_stable_raw_data
+try:
+    from app.models.company import Company
+except ImportError:
+    Company = None  # type: ignore
+
+try:
+    from app.services.ingestion.repositories import XbrlRepository
+except ImportError:
+    XbrlRepository = None  # type: ignore
+
+try:
+    from app.services.ingestion.pipelines import SP500IngestionPipeline
+except ImportError:
+    SP500IngestionPipeline = None  # type: ignore
 
 
 logger = get_logger(__name__)
@@ -35,6 +47,21 @@ class IngestOrchestrator:
     """
 
     def __init__(self, db: Session) -> None:
+        if Company is None:
+            raise ImportError(
+                "Company model is not available. "
+                "This class requires the models module to be properly configured."
+            )
+        if XbrlRepository is None:
+            raise ImportError(
+                "XbrlRepository is not available. "
+                "This class requires the repositories module to be properly configured."
+            )
+        if SP500IngestionPipeline is None:
+            raise ImportError(
+                "SP500IngestionPipeline is not available. "
+                "This class requires the pipelines module to be properly configured."
+            )
         self._db = db
         repository = XbrlRepository()  # Uses default db_client from get_db_client()
         self._pipeline = SP500IngestionPipeline(repository=repository)

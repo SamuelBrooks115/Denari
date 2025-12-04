@@ -1,0 +1,19 @@
+{
+  "symbol": "MSFT",
+  "name": "Microsoft Corporation",
+  "price": 477.73,
+  "changePercentage": -2.50408,
+  "change": -12.27,
+  "volume": 33458975,
+  "dayLow": 475.2,
+  "dayHigh": 484.24,
+  "yearHigh": 555.45,
+  "yearLow": 344.79,
+  "marketCap": 3550971766976.9995,
+  "priceAvg50": 509.4802,
+  "priceAvg200": 468.78656,
+  "exchange": "NASDAQ",
+  "open": 476.29,
+  "previousClose": 490,
+  "timestamp": 1764795602
+}
