@@ -1,5 +1,5 @@
 """
-beta.py — Beta Data Fetch + Excel Link Helpers
+beta.py — Beta Fetch + Excel Link Helpers
 
 Purpose:
 - Pull historical price data for a target ticker and benchmark index
@@ -164,7 +164,7 @@ def write_beta_sheet(workbook, beta_payload):
     """
     import xlsxwriter
     
-    worksheet = workbook.add_worksheet("Beta Data")
+    worksheet = workbook.add_worksheet("Beta")
     
     # Set column widths (xlsxwriter uses character units, not pixels)
     # Column A: 14 characters (approximately 133 pixels)
