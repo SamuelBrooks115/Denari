@@ -572,6 +572,10 @@ export default function NewProjectWizard() {
     return Math.abs(numValue).toString();
   };
 
+  // Helper function to prevent mouse wheel from changing number input values
+  const handleWheel = (e: React.WheelEvent<HTMLInputElement>) => {
+    e.currentTarget.blur();
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -873,7 +877,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="%"
                             value={wizardData.revenueStableValue}
-                            onChange={(e) => setWizardData({ ...wizardData, revenueStableValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, revenueStableValue: e.target.value })}
                             onWheel={(e) => e.currentTarget.blur()}
                             className="flex-1"
                           />
@@ -883,7 +887,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="Step rate %"
                             value={wizardData.revenueStepValue}
-                            onChange={(e) => setWizardData({ ...wizardData, revenueStepValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, revenueStepValue: e.target.value })}
                             onWheel={(e) => e.currentTarget.blur()}
                             className="flex-1"
                           />
@@ -896,7 +900,7 @@ export default function NewProjectWizard() {
                                 type="number"
                                 placeholder={`Y${year + 1} - %`}
                                 value={wizardData.revenueValues[year]}
-                                onChange={(e) => {
+                                onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                   const newValues = [...wizardData.revenueValues];
                                   newValues[year] = e.target.value;
                                   setWizardData({ ...wizardData, revenueValues: newValues });
@@ -930,7 +934,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="%"
                             value={wizardData.grossMarginStableValue}
-                            onChange={(e) => setWizardData({ ...wizardData, grossMarginStableValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, grossMarginStableValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -939,7 +943,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="Step rate %"
                             value={wizardData.grossMarginStepValue}
-                            onChange={(e) => setWizardData({ ...wizardData, grossMarginStepValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, grossMarginStepValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -951,7 +955,7 @@ export default function NewProjectWizard() {
                                 type="number"
                                 placeholder={`Y${year + 1}`}
                                 value={wizardData.grossMarginValues[year]}
-                                onChange={(e) => {
+                                onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                   const newValues = [...wizardData.grossMarginValues];
                                   newValues[year] = e.target.value;
                                   setWizardData({ ...wizardData, grossMarginValues: newValues });
@@ -984,7 +988,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="%"
                             value={wizardData.operatingMarginStableValue}
-                            onChange={(e) => setWizardData({ ...wizardData, operatingMarginStableValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, operatingMarginStableValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -993,7 +997,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="Step rate %"
                             value={wizardData.operatingMarginStepValue}
-                            onChange={(e) => setWizardData({ ...wizardData, operatingMarginStepValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, operatingMarginStepValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -1005,7 +1009,7 @@ export default function NewProjectWizard() {
                                 type="number"
                                 placeholder={`Y${year + 1}`}
                                 value={wizardData.operatingMarginValues[year]}
-                                onChange={(e) => {
+                                onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                   const newValues = [...wizardData.operatingMarginValues];
                                   newValues[year] = e.target.value;
                                   setWizardData({ ...wizardData, operatingMarginValues: newValues });
@@ -1038,8 +1042,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="%"
                             value={wizardData.taxRateStableValue}
-                            onChange={(e) => setWizardData({ ...wizardData, taxRateStableValue: e.target.value })}
-                            onWheel={(e) => e.currentTarget.blur()}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, taxRateStableValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -1048,7 +1051,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="Step rate %"
                             value={wizardData.taxRateStepValue}
-                            onChange={(e) => setWizardData({ ...wizardData, taxRateStepValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, taxRateStepValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -1060,7 +1063,7 @@ export default function NewProjectWizard() {
                                 type="number"
                                 placeholder={`Y${year + 1}`}
                                 value={wizardData.taxRateValues[year]}
-                                onChange={(e) => {
+                                onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                   const newValues = [...wizardData.taxRateValues];
                                   newValues[year] = e.target.value;
                                   setWizardData({ ...wizardData, taxRateValues: newValues });
@@ -1101,7 +1104,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="%"
                             value={wizardData.depreciationStableValue}
-                            onChange={(e) => setWizardData({ ...wizardData, depreciationStableValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, depreciationStableValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -1110,7 +1113,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="Step rate %"
                             value={wizardData.depreciationStepValue}
-                            onChange={(e) => setWizardData({ ...wizardData, depreciationStepValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, depreciationStepValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -1122,7 +1125,7 @@ export default function NewProjectWizard() {
                                 type="number"
                                 placeholder={`Y${year + 1}`}
                                 value={wizardData.depreciationValues[year]}
-                                onChange={(e) => {
+                                onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                   const newValues = [...wizardData.depreciationValues];
                                   newValues[year] = e.target.value;
                                   setWizardData({ ...wizardData, depreciationValues: newValues });
@@ -1155,7 +1158,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="Value"
                             value={wizardData.totalDebtStableValue}
-                            onChange={(e) => setWizardData({ ...wizardData, totalDebtStableValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, totalDebtStableValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -1164,7 +1167,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="Step rate %"
                             value={wizardData.totalDebtStepValue}
-                            onChange={(e) => setWizardData({ ...wizardData, totalDebtStepValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, totalDebtStepValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -1176,7 +1179,7 @@ export default function NewProjectWizard() {
                                 type="number"
                                 placeholder={`Y${year + 1}`}
                                 value={wizardData.totalDebtValues[year]}
-                                onChange={(e) => {
+                                onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                   const newValues = [...wizardData.totalDebtValues];
                                   newValues[year] = e.target.value;
                                   setWizardData({ ...wizardData, totalDebtValues: newValues });
@@ -1209,7 +1212,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="%"
                             value={wizardData.inventoryStableValue}
-                            onChange={(e) => setWizardData({ ...wizardData, inventoryStableValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, inventoryStableValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -1218,7 +1221,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="Step rate %"
                             value={wizardData.inventoryStepValue}
-                            onChange={(e) => setWizardData({ ...wizardData, inventoryStepValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, inventoryStepValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -1230,7 +1233,7 @@ export default function NewProjectWizard() {
                                 type="number"
                                 placeholder={`Y${year + 1}`}
                                 value={wizardData.inventoryValues[year]}
-                                onChange={(e) => {
+                                onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                   const newValues = [...wizardData.inventoryValues];
                                   newValues[year] = e.target.value;
                                   setWizardData({ ...wizardData, inventoryValues: newValues });
@@ -1263,7 +1266,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="%"
                             value={wizardData.debtChangeStableValue}
-                            onChange={(e) => setWizardData({ ...wizardData, debtChangeStableValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, debtChangeStableValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -1272,7 +1275,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="Step rate %"
                             value={wizardData.debtChangeStepValue}
-                            onChange={(e) => setWizardData({ ...wizardData, debtChangeStepValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, debtChangeStepValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -1284,7 +1287,7 @@ export default function NewProjectWizard() {
                                 type="number"
                                 placeholder={`Y${year + 1}`}
                                 value={wizardData.debtChangeValues[year]}
-                                onChange={(e) => {
+                                onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                   const newValues = [...wizardData.debtChangeValues];
                                   newValues[year] = e.target.value;
                                   setWizardData({ ...wizardData, debtChangeValues: newValues });
@@ -1325,8 +1328,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="Percentage"
                             value={formatNegativeDisplay(wizardData.capexValue)}
-                            onWheel={(e) => e.currentTarget.blur()}
-                            onChange={(e) => {
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                               const negativeValue = ensureNegative(e.target.value);
                               setWizardData({ ...wizardData, capexValue: negativeValue });
                             }}
@@ -1357,7 +1359,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="%"
                             value={wizardData.changeInWCStableValue}
-                            onChange={(e) => setWizardData({ ...wizardData, changeInWCStableValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, changeInWCStableValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -1366,7 +1368,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="Step rate %"
                             value={wizardData.changeInWCStepValue}
-                            onChange={(e) => setWizardData({ ...wizardData, changeInWCStepValue: e.target.value })}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, changeInWCStepValue: e.target.value })}
                             className="flex-1"
                           />
                         )}
@@ -1378,7 +1380,7 @@ export default function NewProjectWizard() {
                                 type="number"
                                 placeholder={`Y${year + 1}`}
                                 value={wizardData.changeInWCValues[year]}
-                                onChange={(e) => {
+                                onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                   const newValues = [...wizardData.changeInWCValues];
                                   newValues[year] = e.target.value;
                                   setWizardData({ ...wizardData, changeInWCValues: newValues });
@@ -1399,8 +1401,7 @@ export default function NewProjectWizard() {
                           type="number"
                           placeholder="e.g., 5000"
                           value={formatNegativeDisplay(wizardData.shareRepurchases)}
-                          onWheel={(e) => e.currentTarget.blur()}
-                          onChange={(e) => {
+                          onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                             const negativeValue = ensureNegative(e.target.value);
                             setWizardData({ ...wizardData, shareRepurchases: negativeValue });
                           }}
@@ -1416,8 +1417,7 @@ export default function NewProjectWizard() {
                         type="number"
                         placeholder="e.g., 25"
                         value={wizardData.dividendPercentNI}
-                        onChange={(e) => setWizardData({ ...wizardData, dividendPercentNI: e.target.value })}
-                        onWheel={(e) => e.currentTarget.blur()}
+                        onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, dividendPercentNI: e.target.value })}
                       />
                     </div>
 
@@ -1428,8 +1428,7 @@ export default function NewProjectWizard() {
                         type="number"
                         placeholder="% of tax"
                         value={wizardData.deferredTaxPercent}
-                        onChange={(e) => setWizardData({ ...wizardData, deferredTaxPercent: e.target.value })}
-                        onWheel={(e) => e.currentTarget.blur()}
+                        onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, deferredTaxPercent: e.target.value })}
                       />
                     </div>
                   </div>
@@ -1507,8 +1506,7 @@ export default function NewProjectWizard() {
                             type="number"
                             placeholder="e.g., 1.2"
                             value={wizardData.beta}
-                            onChange={(e) => setWizardData({ ...wizardData, beta: e.target.value })}
-                            onWheel={(e) => e.currentTarget.blur()}
+                            onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, beta: e.target.value })}
                           />
                           {wizardData.betaReference && (
                             <Badge variant="secondary" className="flex items-center w-fit">
@@ -1534,8 +1532,7 @@ export default function NewProjectWizard() {
                         type="number"
                         placeholder="4.33"
                         value={wizardData.marketRiskPremium}
-                        onChange={(e) => setWizardData({ ...wizardData, marketRiskPremium: e.target.value })}
-                        onWheel={(e) => e.currentTarget.blur()}
+                        onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, marketRiskPremium: e.target.value })}
                       />
                       <p className="text-xs text-muted-foreground">Default: 4.33%</p>
                     </div>
@@ -1547,8 +1544,7 @@ export default function NewProjectWizard() {
                         type="number"
                         placeholder="2.5"
                         value={wizardData.riskFreeRate}
-                        onChange={(e) => setWizardData({ ...wizardData, riskFreeRate: e.target.value })}
-                        onWheel={(e) => e.currentTarget.blur()}
+                        onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, riskFreeRate: e.target.value })}
                       />
                       <p className="text-xs text-muted-foreground">Will be autopopulated via API when available</p>
                     </div>
@@ -1560,8 +1556,7 @@ export default function NewProjectWizard() {
                         type="number"
                         placeholder="2.5"
                         value={wizardData.terminalGrowthRate}
-                        onChange={(e) => setWizardData({ ...wizardData, terminalGrowthRate: e.target.value })}
-                        onWheel={(e) => e.currentTarget.blur()}
+                        onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, terminalGrowthRate: e.target.value })}
                       />
                     </div>
                     </div>
@@ -1592,7 +1587,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="%"
                                   value={wizardData.bearRevenueStableValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bearRevenueStableValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bearRevenueStableValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -1601,7 +1596,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="Step rate %"
                                   value={wizardData.bearRevenueStepValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bearRevenueStepValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bearRevenueStepValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -1613,7 +1608,7 @@ export default function NewProjectWizard() {
                                       type="number"
                                       placeholder={`Y${year + 1} - %`}
                                       value={wizardData.bearRevenueValues[year]}
-                                      onChange={(e) => {
+                                      onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                         const newValues = [...wizardData.bearRevenueValues];
                                         newValues[year] = e.target.value;
                                         setWizardData({ ...wizardData, bearRevenueValues: newValues });
@@ -1646,7 +1641,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="%"
                                   value={wizardData.bearGrossMarginStableValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bearGrossMarginStableValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bearGrossMarginStableValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -1655,7 +1650,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="Step rate %"
                                   value={wizardData.bearGrossMarginStepValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bearGrossMarginStepValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bearGrossMarginStepValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -1667,7 +1662,7 @@ export default function NewProjectWizard() {
                                       type="number"
                                       placeholder={`Y${year + 1}`}
                                       value={wizardData.bearGrossMarginValues[year]}
-                                      onChange={(e) => {
+                                      onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                         const newValues = [...wizardData.bearGrossMarginValues];
                                         newValues[year] = e.target.value;
                                         setWizardData({ ...wizardData, bearGrossMarginValues: newValues });
@@ -1700,7 +1695,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="%"
                                   value={wizardData.bearOperatingMarginStableValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bearOperatingMarginStableValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bearOperatingMarginStableValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -1709,7 +1704,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="Step rate %"
                                   value={wizardData.bearOperatingMarginStepValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bearOperatingMarginStepValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bearOperatingMarginStepValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -1721,7 +1716,7 @@ export default function NewProjectWizard() {
                                       type="number"
                                       placeholder={`Y${year + 1}`}
                                       value={wizardData.bearOperatingMarginValues[year]}
-                                      onChange={(e) => {
+                                      onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                         const newValues = [...wizardData.bearOperatingMarginValues];
                                         newValues[year] = e.target.value;
                                         setWizardData({ ...wizardData, bearOperatingMarginValues: newValues });
@@ -1754,7 +1749,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="%"
                                   value={wizardData.bearTaxRateStableValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bearTaxRateStableValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bearTaxRateStableValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -1763,7 +1758,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="Step rate %"
                                   value={wizardData.bearTaxRateStepValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bearTaxRateStepValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bearTaxRateStepValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -1775,7 +1770,7 @@ export default function NewProjectWizard() {
                                       type="number"
                                       placeholder={`Y${year + 1}`}
                                       value={wizardData.bearTaxRateValues[year]}
-                                      onChange={(e) => {
+                                      onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                         const newValues = [...wizardData.bearTaxRateValues];
                                         newValues[year] = e.target.value;
                                         setWizardData({ ...wizardData, bearTaxRateValues: newValues });
@@ -1794,7 +1789,7 @@ export default function NewProjectWizard() {
                               type="number"
                               placeholder="e.g., 10"
                               value={wizardData.bearDepreciationPercentPPE}
-                              onChange={(e) => setWizardData({ ...wizardData, bearDepreciationPercentPPE: e.target.value })}
+                              onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bearDepreciationPercentPPE: e.target.value })}
                             />
                           </div>
 
@@ -1819,7 +1814,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="Percentage"
                                   value={formatNegativeDisplay(wizardData.bearCapexValue)}
-                                  onChange={(e) => {
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                     const negativeValue = ensureNegative(e.target.value);
                                     setWizardData({ ...wizardData, bearCapexValue: negativeValue });
                                   }}
@@ -1850,7 +1845,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="%"
                                   value={wizardData.bearChangeInWCStableValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bearChangeInWCStableValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bearChangeInWCStableValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -1859,7 +1854,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="Step rate %"
                                   value={wizardData.bearChangeInWCStepValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bearChangeInWCStepValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bearChangeInWCStepValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -1871,7 +1866,7 @@ export default function NewProjectWizard() {
                                       type="number"
                                       placeholder={`Y${year + 1}`}
                                       value={wizardData.bearChangeInWCValues[year]}
-                                      onChange={(e) => {
+                                      onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                         const newValues = [...wizardData.bearChangeInWCValues];
                                         newValues[year] = e.target.value;
                                         setWizardData({ ...wizardData, bearChangeInWCValues: newValues });
@@ -1948,7 +1943,7 @@ export default function NewProjectWizard() {
                                     type="number"
                                     placeholder="e.g., 1.2"
                                     value={wizardData.beta}
-                                    onChange={(e) => setWizardData({ ...wizardData, beta: e.target.value })}
+                                    onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, beta: e.target.value })}
                                   />
                                   {wizardData.betaReference && (
                                     <Badge variant="secondary" className="flex items-center w-fit">
@@ -1974,7 +1969,7 @@ export default function NewProjectWizard() {
                                 type="number"
                                 placeholder="6.0"
                                 value={wizardData.marketRiskPremium}
-                                onChange={(e) => setWizardData({ ...wizardData, marketRiskPremium: e.target.value })}
+                                onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, marketRiskPremium: e.target.value })}
                               />
                               <p className="text-xs text-muted-foreground">Default: 6.0%</p>
                             </div>
@@ -1986,7 +1981,7 @@ export default function NewProjectWizard() {
                                 type="number"
                                 placeholder="2.5"
                                 value={wizardData.riskFreeRate}
-                                onChange={(e) => setWizardData({ ...wizardData, riskFreeRate: e.target.value })}
+                                onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, riskFreeRate: e.target.value })}
                               />
                               <p className="text-xs text-muted-foreground">Will be autopopulated via API when available</p>
                             </div>
@@ -1998,7 +1993,7 @@ export default function NewProjectWizard() {
                                 type="number"
                                 placeholder="2.5"
                                 value={wizardData.terminalGrowthRate}
-                                onChange={(e) => setWizardData({ ...wizardData, terminalGrowthRate: e.target.value })}
+                                onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, terminalGrowthRate: e.target.value })}
                               />
                             </div>
                           </div>
@@ -2029,7 +2024,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="%"
                                   value={wizardData.bullRevenueStableValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bullRevenueStableValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bullRevenueStableValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -2038,7 +2033,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="Step rate %"
                                   value={wizardData.bullRevenueStepValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bullRevenueStepValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bullRevenueStepValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -2050,7 +2045,7 @@ export default function NewProjectWizard() {
                                       type="number"
                                       placeholder={`Y${year + 1} - %`}
                                       value={wizardData.bullRevenueValues[year]}
-                                      onChange={(e) => {
+                                      onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                         const newValues = [...wizardData.bullRevenueValues];
                                         newValues[year] = e.target.value;
                                         setWizardData({ ...wizardData, bullRevenueValues: newValues });
@@ -2083,7 +2078,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="%"
                                   value={wizardData.bullGrossMarginStableValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bullGrossMarginStableValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bullGrossMarginStableValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -2092,7 +2087,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="Step rate %"
                                   value={wizardData.bullGrossMarginStepValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bullGrossMarginStepValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bullGrossMarginStepValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -2104,7 +2099,7 @@ export default function NewProjectWizard() {
                                       type="number"
                                       placeholder={`Y${year + 1}`}
                                       value={wizardData.bullGrossMarginValues[year]}
-                                      onChange={(e) => {
+                                      onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                         const newValues = [...wizardData.bullGrossMarginValues];
                                         newValues[year] = e.target.value;
                                         setWizardData({ ...wizardData, bullGrossMarginValues: newValues });
@@ -2137,7 +2132,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="%"
                                   value={wizardData.bullOperatingMarginStableValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bullOperatingMarginStableValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bullOperatingMarginStableValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -2146,7 +2141,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="Step rate %"
                                   value={wizardData.bullOperatingMarginStepValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bullOperatingMarginStepValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bullOperatingMarginStepValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -2158,7 +2153,7 @@ export default function NewProjectWizard() {
                                       type="number"
                                       placeholder={`Y${year + 1}`}
                                       value={wizardData.bullOperatingMarginValues[year]}
-                                      onChange={(e) => {
+                                      onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                         const newValues = [...wizardData.bullOperatingMarginValues];
                                         newValues[year] = e.target.value;
                                         setWizardData({ ...wizardData, bullOperatingMarginValues: newValues });
@@ -2191,7 +2186,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="%"
                                   value={wizardData.bullTaxRateStableValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bullTaxRateStableValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bullTaxRateStableValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -2200,7 +2195,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="Step rate %"
                                   value={wizardData.bullTaxRateStepValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bullTaxRateStepValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bullTaxRateStepValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -2212,7 +2207,7 @@ export default function NewProjectWizard() {
                                       type="number"
                                       placeholder={`Y${year + 1}`}
                                       value={wizardData.bullTaxRateValues[year]}
-                                      onChange={(e) => {
+                                      onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                         const newValues = [...wizardData.bullTaxRateValues];
                                         newValues[year] = e.target.value;
                                         setWizardData({ ...wizardData, bullTaxRateValues: newValues });
@@ -2231,7 +2226,7 @@ export default function NewProjectWizard() {
                               type="number"
                               placeholder="e.g., 10"
                               value={wizardData.bullDepreciationPercentPPE}
-                              onChange={(e) => setWizardData({ ...wizardData, bullDepreciationPercentPPE: e.target.value })}
+                              onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bullDepreciationPercentPPE: e.target.value })}
                             />
                           </div>
 
@@ -2256,7 +2251,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="Percentage"
                                   value={formatNegativeDisplay(wizardData.bullCapexValue)}
-                                  onChange={(e) => {
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                     const negativeValue = ensureNegative(e.target.value);
                                     setWizardData({ ...wizardData, bullCapexValue: negativeValue });
                                   }}
@@ -2287,7 +2282,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="%"
                                   value={wizardData.bullChangeInWCStableValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bullChangeInWCStableValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bullChangeInWCStableValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -2296,7 +2291,7 @@ export default function NewProjectWizard() {
                                   type="number"
                                   placeholder="Step rate %"
                                   value={wizardData.bullChangeInWCStepValue}
-                                  onChange={(e) => setWizardData({ ...wizardData, bullChangeInWCStepValue: e.target.value })}
+                                  onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, bullChangeInWCStepValue: e.target.value })}
                                   className="flex-1"
                                 />
                               )}
@@ -2308,7 +2303,7 @@ export default function NewProjectWizard() {
                                       type="number"
                                       placeholder={`Y${year + 1}`}
                                       value={wizardData.bullChangeInWCValues[year]}
-                                      onChange={(e) => {
+                                      onChange={(e) => onWheel={(e) => e.currentTarget.blur()} {
                                         const newValues = [...wizardData.bullChangeInWCValues];
                                         newValues[year] = e.target.value;
                                         setWizardData({ ...wizardData, bullChangeInWCValues: newValues });
@@ -2385,7 +2380,7 @@ export default function NewProjectWizard() {
                                     type="number"
                                     placeholder="e.g., 1.2"
                                     value={wizardData.beta}
-                                    onChange={(e) => setWizardData({ ...wizardData, beta: e.target.value })}
+                                    onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, beta: e.target.value })}
                                   />
                                   {wizardData.betaReference && (
                                     <Badge variant="secondary" className="flex items-center w-fit">
@@ -2411,7 +2406,7 @@ export default function NewProjectWizard() {
                                 type="number"
                                 placeholder="6.0"
                                 value={wizardData.marketRiskPremium}
-                                onChange={(e) => setWizardData({ ...wizardData, marketRiskPremium: e.target.value })}
+                                onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, marketRiskPremium: e.target.value })}
                               />
                               <p className="text-xs text-muted-foreground">Default: 6.0%</p>
                             </div>
@@ -2423,7 +2418,7 @@ export default function NewProjectWizard() {
                                 type="number"
                                 placeholder="2.5"
                                 value={wizardData.riskFreeRate}
-                                onChange={(e) => setWizardData({ ...wizardData, riskFreeRate: e.target.value })}
+                                onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, riskFreeRate: e.target.value })}
                               />
                               <p className="text-xs text-muted-foreground">Will be autopopulated via API when available</p>
                             </div>
@@ -2435,7 +2430,7 @@ export default function NewProjectWizard() {
                                 type="number"
                                 placeholder="2.5"
                                 value={wizardData.terminalGrowthRate}
-                                onChange={(e) => setWizardData({ ...wizardData, terminalGrowthRate: e.target.value })}
+                                onChange={(e) => onWheel={(e) => e.currentTarget.blur()} setWizardData({ ...wizardData, terminalGrowthRate: e.target.value })}
                               />
                             </div>
                           </div>
@@ -2592,4 +2587,5 @@ export default function NewProjectWizard() {
     </div>
   );
 }
+
 

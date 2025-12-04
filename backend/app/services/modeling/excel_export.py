@@ -29,8 +29,8 @@ This module does NOT:
 
 from io import BytesIO
 from sqlalchemy.orm import Session
-from typing import Optional, Dict, Any
 from __future__ import annotations
+from typing import Optional, Dict, Any, Union
 
 from collections import defaultdict
 from datetime import datetime
@@ -206,7 +206,10 @@ def load_structured_json(path: str) -> Dict[str, Any]:
     # Check if it's an array format (like F_income_statement_stable_raw.json)
     if isinstance(data, list) and len(data) > 0:
         # Transform array format to standard format
-        return _transform_array_format_to_standard(data)
+        data = _transform_array_format_to_standard(data)
+    
+    # Normalize CAPEX and Share Repurchases values to be negative
+    data = _normalize_capex_and_share_repurchases(data)
     
     return data
 
@@ -365,7 +368,82 @@ def _transform_array_format_to_standard(data: List[Dict[str, Any]]) -> Dict[str,
     }
     
     logger.info(f"Transformed array format JSON: {len(data)} periods -> {len(line_items)} line items")
+    
+    # Normalize CAPEX and Share Repurchases values to be negative
+    result = _normalize_capex_and_share_repurchases(result)
+    
     return result
+
+
+def _normalize_capex_and_share_repurchases(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize CAPEX and Share Repurchases values to always be negative.
+    
+    This function ensures that:
+    - cashFlow.capex.value is always negative
+    - cashFlow.shareRepurchases is always negative
+    - bearScenario.capex.value is always negative
+    - bullScenario.capex.value is always negative
+    
+    All other fields remain exactly as provided.
+    
+    Args:
+        data: The JSON data dictionary
+        
+    Returns:
+        Normalized JSON data dictionary
+    """
+    def ensure_negative(value: Union[str, int, float, None]) -> Union[str, int, float, None]:
+        """Ensure a value is always negative."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            if value == "" or value.strip() == "":
+                return value
+            try:
+                num_value = float(value)
+                if num_value < 0:
+                    return value  # Already negative
+                return str(-abs(num_value))  # Make negative
+            except (ValueError, TypeError):
+                return value  # Not a number
+        if isinstance(value, (int, float)):
+            if value < 0:
+                return value  # Already negative
+            return -abs(value)  # Make negative
+        return value
+    
+    # Normalize cashFlow.capex.value
+    if "cashFlow" in data and isinstance(data["cashFlow"], dict):
+        if "capex" in data["cashFlow"] and isinstance(data["cashFlow"]["capex"], dict):
+            if "value" in data["cashFlow"]["capex"]:
+                data["cashFlow"]["capex"]["value"] = ensure_negative(
+                    data["cashFlow"]["capex"]["value"]
+                )
+        
+        # Normalize cashFlow.shareRepurchases
+        if "shareRepurchases" in data["cashFlow"]:
+            data["cashFlow"]["shareRepurchases"] = ensure_negative(
+                data["cashFlow"]["shareRepurchases"]
+            )
+    
+    # Normalize bearScenario.capex.value
+    if "bearScenario" in data and isinstance(data["bearScenario"], dict):
+        if "capex" in data["bearScenario"] and isinstance(data["bearScenario"]["capex"], dict):
+            if "value" in data["bearScenario"]["capex"]:
+                data["bearScenario"]["capex"]["value"] = ensure_negative(
+                    data["bearScenario"]["capex"]["value"]
+                )
+    
+    # Normalize bullScenario.capex.value
+    if "bullScenario" in data and isinstance(data["bullScenario"], dict):
+        if "capex" in data["bullScenario"] and isinstance(data["bullScenario"]["capex"], dict):
+            if "value" in data["bullScenario"]["capex"]:
+                data["bullScenario"]["capex"]["value"] = ensure_negative(
+                    data["bullScenario"]["capex"]["value"]
+                )
+    
+    return data
 
 
 def _convert_fmp_array_to_line_items(

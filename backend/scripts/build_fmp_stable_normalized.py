@@ -17,10 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-<<<<<<< Updated upstream
 from dataclasses import asdict
-=======
->>>>>>> Stashed changes
 from pathlib import Path
 
 from app.data.fmp_stable_normalizer import (
@@ -124,11 +121,7 @@ def main():
         with output_path.open("w", encoding="utf-8") as f:
             json.dump(output_data, f, indent=2, ensure_ascii=False)
         
-<<<<<<< Updated upstream
-        print(f"✓ Successfully built normalized financials and wrote to {args.output_json}")
-=======
         print(f"Successfully built normalized financials and wrote to {args.output_json}")
->>>>>>> Stashed changes
         print(f"  Symbol: {normalized.symbol}")
         print(f"  Fiscal Year: {normalized.fiscal_year}")
         print(f"  Period End: {normalized.period_end_date}")
@@ -136,13 +129,10 @@ def main():
             print(f"  Revenue: ${normalized.revenue:,.0f}")
         if normalized.net_income:
             print(f"  Net Income: ${normalized.net_income:,.0f}")
-<<<<<<< Updated upstream
         if normalized.total_assets:
             print(f"  Total Assets: ${normalized.total_assets:,.0f}")
         if normalized.total_debt:
             print(f"  Total Debt: ${normalized.total_debt:,.0f}")
-=======
->>>>>>> Stashed changes
     
     except FileNotFoundError as e:
         print(f"ERROR: {e}", file=sys.stderr)

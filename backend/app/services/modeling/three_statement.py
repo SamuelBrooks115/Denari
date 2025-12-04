@@ -10,17 +10,12 @@ Purpose:
 This module is unit-testable without Excel and uses structured dataclass outputs.
 """
 
-<<<<<<< HEAD
 from typing import Dict, Any, List, Optional
-from datetime import datetime
-=======
-from typing import Dict, Any, List
 
 from app.services.modeling.types import (
     CompanyModelInput,
     ThreeStatementOutput,
 )
->>>>>>> 0251f9db5f18529bdb0bfc587a03702c55279b35
 
 
 def run_three_statement(
@@ -155,19 +150,18 @@ def run_three_statement(
         fcf = net_income + depreciation - capex
         fcf_proj.append(fcf)
 
-<<<<<<< HEAD
-    return {
-        "periods": projected_periods,
-        "revenue": revenue_proj,
-        "cogs": cogs_proj,
-        "gross_profit": gross_profit_proj,
-        "operating_expense": operating_expense_proj,
-        "operating_income": operating_income_proj,
-        "net_income": net_income_proj,
-        "capex": capex_proj,
-        "depreciation": depreciation_proj,
-        "free_cash_flow": fcf_proj,
-    }
+    return ThreeStatementOutput(
+        periods=projected_periods,
+        revenue=revenue_proj,
+        cogs=cogs_proj,
+        gross_profit=gross_profit_proj,
+        operating_expense=operating_expense_proj,
+        operating_income=operating_income_proj,
+        net_income=net_income_proj,
+        capex=capex_proj,
+        depreciation=depreciation_proj,
+        free_cash_flow=fcf_proj,
+    )
 
 
 # Formula template dictionary for 3-statement model Excel output
@@ -1025,17 +1019,3 @@ def write_three_statement_sheet(
     worksheet.set_column(start_col, start_col, 25)  # Label column
     for col_idx in range(num_periods):
         worksheet.set_column(start_col + 1 + col_idx, start_col + 1 + col_idx, 15)  # Data columns
-=======
-    return ThreeStatementOutput(
-        periods=projected_periods,
-        revenue=revenue_proj,
-        cogs=cogs_proj,
-        gross_profit=gross_profit_proj,
-        operating_expense=operating_expense_proj,
-        operating_income=operating_income_proj,
-        net_income=net_income_proj,
-        capex=capex_proj,
-        depreciation=depreciation_proj,
-        free_cash_flow=fcf_proj,
-    )
->>>>>>> 0251f9db5f18529bdb0bfc587a03702c55279b35

@@ -61,7 +61,7 @@ class FinancialFactOut:
 # Endpoints
 # -----------------------------------------------------------------------------
 
-@router.get("/{company_id}", response_model=List[FinancialFactOut])
+@router.get("/{company_id}")
 async def get_financials(company_id: int,
                          statement: Optional[str] = None,
                          db=Depends(get_db)):

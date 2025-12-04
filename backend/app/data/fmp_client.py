@@ -19,6 +19,7 @@ import requests
 from dotenv import load_dotenv
 
 from app.core.logging import get_logger
+from app.core.config import settings
 
 # Load .env file if it exists (from project root)
 env_file = Path(__file__).parent.parent.parent / ".env"
@@ -48,7 +49,13 @@ def get_fmp_api_key() -> str:
     Raises:
         RuntimeError: If FMP_API_KEY environment variable is not set or file cannot be read
     """
-    api_key_path_or_value = os.getenv("FMP_API_KEY")
+    # First try to get from settings (loads from .env via Pydantic)
+    api_key_path_or_value = settings.FMP_API_KEY
+    
+    # Fallback to os.getenv if settings doesn't have it
+    if not api_key_path_or_value:
+        api_key_path_or_value = os.getenv("FMP_API_KEY")
+    
     if not api_key_path_or_value:
         raise RuntimeError(
             "FMP_API_KEY environment variable is not set. "
@@ -838,3 +845,120 @@ def fetch_available_tickers() -> List[Dict[str, Any]]:
             f"FMP API returned unexpected data type for available tickers: {type(data)}. "
             f"Expected a list."
         )
+
+
+def fetch_treasury_rates() -> Dict[str, Any]:
+    """
+    Fetch treasury rates from FMP API.
+    
+    Calls /stable/treasury-rates?apikey=...
+    
+    Returns:
+        Dictionary with treasury rate data. The most recent entry contains:
+        - date: str (date of the rate)
+        - year1: float (1-year treasury rate)
+        - year2: float (2-year treasury rate)
+        - year3: float (3-year treasury rate)
+        - year5: float (5-year treasury rate)
+        - year10: float (10-year treasury rate)
+        - year20: float (20-year treasury rate)
+        - year30: float (30-year treasury rate)
+        
+    Raises:
+        RuntimeError: If API call fails or returns invalid data
+    """
+    # Try both /stable/treasury-rates and /api/v4/treasury endpoints
+    endpoints_to_try = [
+        ("treasury-rates", FMP_BASE_URL),  # /stable/treasury-rates
+        ("treasury", "https://financialmodelingprep.com/api/v4"),  # /api/v4/treasury
+    ]
+    
+    logger.info("Fetching treasury rates from FMP")
+    
+    last_error = None
+    for endpoint_path, base_url in endpoints_to_try:
+        try:
+            api_key = get_fmp_api_key()
+            
+            # Build full URL
+            clean_path = endpoint_path.lstrip("/")
+            url = f"{base_url}/{clean_path}"
+            
+            # Prepare parameters
+            params = {"apikey": api_key}
+            
+            logger.debug(f"Making FMP API request: {url}")
+            
+            response = requests.get(url, params=params, timeout=30)
+            
+            # Handle rate limiting and errors (similar to _get_json)
+            if response.status_code == 429:
+                if base_url == endpoints_to_try[-1][1]:  # Last endpoint
+                    raise RuntimeError("FMP API rate limit exceeded")
+                continue
+            
+            if response.status_code in {500, 502, 503, 504}:
+                if base_url == endpoints_to_try[-1][1]:  # Last endpoint
+                    response.raise_for_status()
+                continue
+            
+            if response.status_code == 401:
+                raise RuntimeError(
+                    "FMP API returned 401 Unauthorized. Your API key may be invalid or expired."
+                )
+            
+            if response.status_code == 403:
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("Error Message", "Forbidden")
+                except:
+                    error_msg = "Forbidden"
+                raise RuntimeError(f"FMP API returned 403 Forbidden. Error: {error_msg}")
+            
+            response.raise_for_status()
+            
+            # Parse JSON
+            data = response.json()
+            
+            # Handle different response formats
+            if isinstance(data, list) and len(data) > 0:
+                # API returns array with most recent first
+                latest_rate = data[0]
+                logger.info("Successfully fetched treasury rates from FMP")
+                return latest_rate
+            elif isinstance(data, dict):
+                # API returns single dict
+                logger.info("Successfully fetched treasury rates from FMP")
+                return data
+            else:
+                raise RuntimeError(
+                    f"FMP API returned unexpected data type for treasury rates: {type(data)}. "
+                    f"Expected list or dict."
+                )
+        
+        except RuntimeError as e:
+            last_error = e
+            # If it's a 404, try next endpoint
+            if "404" in str(e) or "Not Found" in str(e):
+                logger.debug(f"Endpoint {endpoint_path} returned 404, trying next...")
+                continue
+            else:
+                # Other errors, re-raise
+                raise
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            if base_url == endpoints_to_try[-1][1]:  # Last endpoint
+                raise RuntimeError(
+                    f"Failed to fetch treasury rates from FMP API: {e}\n"
+                    f"Tried endpoints: {', '.join([ep[0] for ep in endpoints_to_try])}"
+                ) from e
+            continue
+    
+    # If all endpoints failed
+    if last_error:
+        raise RuntimeError(
+            f"Failed to fetch treasury rates from FMP API after trying all endpoints.\n"
+            f"Last error: {last_error}"
+        )
+    else:
+        raise RuntimeError("Failed to fetch treasury rates from FMP API")
