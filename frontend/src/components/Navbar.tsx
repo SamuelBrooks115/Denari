@@ -43,7 +43,7 @@ export const Navbar = () => {
             </Link>
             {isLoggedIn && (
               <Link
-                to="/app/model"
+                to="/app/projects"
                 className="text-sm font-medium text-denari-4 hover:text-primary transition-colors"
               >
                 Model
