@@ -4,18 +4,34 @@ import { VideoPlayer } from "@/components/VideoPlayer";
 import { SectionHeader } from "@/components/SectionHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { FileSpreadsheet, TrendingUp, Calculator, Briefcase } from "lucide-react";
 
 export default function Landing() {
+  const navigate = useNavigate();
+
+  const handleQuickLinkClick = (href: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    // Scroll to top first
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // Then navigate after a brief delay to ensure scroll starts
+    setTimeout(() => {
+      navigate(href);
+    }, 100);
+  };
+
   const carouselItems = [
     <Card key={1} className="shadow-soft">
       <CardHeader>
-        <CardTitle>Excel Output 1</CardTitle>
+        <CardTitle>3 Statement Model</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="aspect-video bg-gradient-card rounded-lg flex items-center justify-center text-white">
-          <FileSpreadsheet className="h-16 w-16 opacity-50" />
+        <div className="aspect-video bg-gradient-card rounded-lg overflow-hidden">
+          <img 
+            src="/photos/3Statement_EX.png" 
+            alt="3 Statement Model Excel Output" 
+            className="w-full h-full object-contain"
+          />
         </div>
         <p className="mt-4 text-sm text-muted-foreground">
           Comprehensive 3-statement model with detailed assumptions and drivers
@@ -24,11 +40,15 @@ export default function Landing() {
     </Card>,
     <Card key={2} className="shadow-soft">
       <CardHeader>
-        <CardTitle>Excel Output 2</CardTitle>
+        <CardTitle>DCF Valuation</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="aspect-video bg-gradient-card rounded-lg flex items-center justify-center text-white">
-          <TrendingUp className="h-16 w-16 opacity-50" />
+        <div className="aspect-video bg-gradient-card rounded-lg overflow-hidden">
+          <img 
+            src="/photos/DCF_EX.png" 
+            alt="DCF Valuation Excel Output" 
+            className="w-full h-full object-contain"
+          />
         </div>
         <p className="mt-4 text-sm text-muted-foreground">
           DCF valuation with sensitivity analysis and multiple scenarios
@@ -37,11 +57,15 @@ export default function Landing() {
     </Card>,
     <Card key={3} className="shadow-soft">
       <CardHeader>
-        <CardTitle>Excel Output 3</CardTitle>
+        <CardTitle>Relative Valuation</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="aspect-video bg-gradient-card rounded-lg flex items-center justify-center text-white">
-          <Calculator className="h-16 w-16 opacity-50" />
+        <div className="aspect-video bg-gradient-card rounded-lg overflow-hidden">
+          <img 
+            src="/photos/RC_EX.png" 
+            alt="Relative Valuation Excel Output" 
+            className="w-full h-full object-contain"
+          />
         </div>
         <p className="mt-4 text-sm text-muted-foreground">
           Relative valuation comparables with automatic peer selection
@@ -131,7 +155,11 @@ export default function Landing() {
           <SectionHeader title="Quick Links" subtitle="Explore our powerful modeling capabilities" />
           <div className="mt-12 grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
             {quickLinks.map((link) => (
-              <Link key={link.href} to={link.href}>
+              <div
+                key={link.href}
+                onClick={(e) => handleQuickLinkClick(link.href, e)}
+                className="cursor-pointer"
+              >
                 <Card className="h-full shadow-soft hover:shadow-elevated transition-all hover:scale-[1.02]">
                   <CardHeader>
                     <div className="flex items-center gap-3">
@@ -145,7 +173,7 @@ export default function Landing() {
                     <p className="text-muted-foreground">{link.description}</p>
                   </CardContent>
                 </Card>
-              </Link>
+              </div>
             ))}
           </div>
         </div>

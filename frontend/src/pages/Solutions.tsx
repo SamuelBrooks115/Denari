@@ -6,9 +6,12 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router-dom";
 import { Check, Users } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function Solutions() {
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
   const [employees, setEmployees] = useState("5");
   const [billingPeriod, setBillingPeriod] = useState<"monthly" | "quarterly">("quarterly");
 

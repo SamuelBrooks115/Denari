@@ -1,8 +1,12 @@
 import { Hero } from "@/components/Hero";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { FileSpreadsheet } from "lucide-react";
+import { useEffect } from "react";
 
 export default function DCF() {
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
   return (
     <div className="min-h-screen">
       <Hero title="DCF Valuation" subtitle="Sophisticated discounted cash flow analysis" />
@@ -21,8 +25,12 @@ export default function DCF() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="aspect-video bg-gradient-card rounded-lg flex items-center justify-center mb-4">
-                  <FileSpreadsheet className="h-16 w-16 text-white opacity-50" />
+                <div className="aspect-video bg-gradient-card rounded-lg overflow-hidden mb-4">
+                  <img 
+                    src="/photos/DCF_EX.png" 
+                    alt="DCF Analysis Excel Output" 
+                    className="w-full h-full object-contain"
+                  />
                 </div>
                 <p className="text-muted-foreground">
                   Comprehensive DCF analysis with detailed assumptions and drivers clearly displayed. 

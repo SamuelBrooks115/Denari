@@ -4,8 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link } from "react-router-dom";
 import { FileText, TrendingUp, DollarSign } from "lucide-react";
+import { useEffect } from "react";
 
 export default function ThreeStatement() {
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
   const statements = [
     {
       title: "Income Statement",

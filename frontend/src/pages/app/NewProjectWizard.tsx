@@ -65,6 +65,8 @@ export default function NewProjectWizard() {
   const [currentStep, setCurrentStep] = useState<WizardStep>("search");
   const [isSearching, setIsSearching] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [savedProjectId, setSavedProjectId] = useState<string | null>(null);
   const [wizardData, setWizardData] = useState({
     companyName: "",
     ticker: "",
@@ -575,7 +577,7 @@ export default function NewProjectWizard() {
     }
   };
 
-  const handleFinish = () => {
+  const handleFinish = async () => {
     if (!selectedCompany) {
       toast.error("Please select a company");
       return;
@@ -592,6 +594,7 @@ export default function NewProjectWizard() {
       return;
     }
     
+    setIsSaving(true);
     try {
       // Debug: Log wizardData before conversion
       console.log("\n=== WIZARD DATA BEFORE CONVERSION ===");
@@ -621,20 +624,91 @@ export default function NewProjectWizard() {
       // Output JSON to console for verification
       outputProjectDataJSON(projectData);
       
-      // Save to localStorage (primary storage - accessible for Excel export later)
+      // Save to localStorage (for frontend access)
       saveProjectDataToLocalStorage(projectData);
       
       // Download JSON file for backend testing
       saveProjectDataToFile(projectData);
       
-      // Note: JSON is stored in browser localStorage, not downloaded
-      // Access it later using: getLatestProject() or getProjectById() from saveProjectData.ts
+      // Save to backend API
+      const response = await fetch(`${API_BASE_URL}/api/v1/projects/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(projectData),
+      });
       
-      toast.success("Project created and saved successfully! JSON file downloaded. Check console for output.");
-      navigate("/app/projects");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: "Unknown error" }));
+        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+      }
+      
+      const saveResult = await response.json();
+      setSavedProjectId(projectData.projectId);
+      
+      toast.success("Project saved successfully! You can now generate the valuation.");
     } catch (error) {
       console.error("Error saving project:", error);
-      toast.error("Failed to save project. Please try again.");
+      toast.error(`Failed to save project: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleGenerateValuation = async () => {
+    if (!savedProjectId) {
+      toast.error("Please save the project first before generating valuation.");
+      return;
+    }
+    
+    setIsGenerating(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/valuation/export`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ projectId: savedProjectId }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: "Unknown error" }));
+        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+      }
+      
+      // Get the filename from Content-Disposition header or use default
+      const contentDisposition = response.headers.get("Content-Disposition");
+      let filename = `${selectedCompany?.ticker || "valuation"}_valuation.xlsx`;
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      // Download the file
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      toast.success("Valuation Excel file downloaded successfully!");
+      
+      // Redirect to My Projects after a short delay
+      setTimeout(() => {
+        navigate("/app/projects");
+      }, 1000);
+    } catch (error) {
+      console.error("Error generating valuation:", error);
+      toast.error(`Failed to generate valuation: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -2628,20 +2702,62 @@ export default function NewProjectWizard() {
                   </div>
                 </div>
 
-                {/* Generate Button */}
-                <div className="flex justify-end pt-6 border-t">
+                {/* Save and Generate Buttons */}
+                <div className="flex justify-end gap-4 pt-6 border-t">
                   <Button 
                     onClick={handleFinish} 
+                    className="bg-secondary hover:bg-secondary/90" 
+                    size="lg"
+                    disabled={
+                      isSaving || 
+                      !wizardData.competitors || 
+                      wizardData.competitors.length !== 4 ||
+                      savedProjectId !== null
+                    }
+                  >
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : savedProjectId ? (
+                      <>
+                        <CheckCircle className="mr-2 h-4 w-4" />
+                        Saved
+                      </>
+                    ) : (
+                      "Save Project"
+                    )}
+                  </Button>
+                  <Button 
+                    onClick={handleGenerateValuation} 
                     className="bg-primary hover:bg-primary/90" 
                     size="lg"
-                    disabled={!wizardData.competitors || wizardData.competitors.length !== 4}
+                    disabled={
+                      !savedProjectId || 
+                      isGenerating ||
+                      !wizardData.competitors || 
+                      wizardData.competitors.length !== 4
+                    }
                   >
-                    Generate Valuation
+                    {isGenerating ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      "Generate Valuation"
+                    )}
                   </Button>
                 </div>
                 {wizardData.competitors && wizardData.competitors.length !== 4 && (
                   <p className="text-sm text-orange-600 text-right mt-2">
                     Please select exactly 4 competitors to continue
+                  </p>
+                )}
+                {!savedProjectId && wizardData.competitors && wizardData.competitors.length === 4 && (
+                  <p className="text-sm text-muted-foreground text-right mt-2">
+                    Click "Save Project" first, then "Generate Valuation"
                   </p>
                 )}
             </CardContent>

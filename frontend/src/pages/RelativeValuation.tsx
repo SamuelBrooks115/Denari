@@ -1,8 +1,11 @@
 import { Hero } from "@/components/Hero";
 import { Card, CardContent } from "@/components/ui/card";
-import { BarChart2, PieChart } from "lucide-react";
+import { useEffect } from "react";
 
 export default function RelativeValuation() {
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
   return (
     <div className="min-h-screen">
       <Hero title="Relative Valuation" subtitle="Compare companies using industry-standard multiples" />
@@ -10,27 +13,19 @@ export default function RelativeValuation() {
       <section className="py-16 bg-background">
         <div className="container mx-auto px-4">
           <div className="max-w-5xl mx-auto">
-            <div className="grid md:grid-cols-2 gap-8 mb-12">
+            <div className="mb-12">
               <Card className="shadow-soft">
                 <CardContent className="p-6">
-                  <div className="aspect-video bg-gradient-card rounded-lg flex items-center justify-center mb-4">
-                    <BarChart2 className="h-16 w-16 text-white opacity-50" />
+                  <div className="aspect-video bg-gradient-card rounded-lg overflow-hidden mb-4">
+                    <img 
+                      src="/photos/RC_EX.png" 
+                      alt="Relative Valuation Excel Output" 
+                      className="w-full h-full object-contain"
+                    />
                   </div>
-                  <h3 className="text-xl font-semibold mb-2">Photo of Output 1</h3>
+                  <h3 className="text-xl font-semibold mb-2">Relative Valuation Output</h3>
                   <p className="text-muted-foreground">
                     Comprehensive comparable company analysis with automated peer selection
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card className="shadow-soft">
-                <CardContent className="p-6">
-                  <div className="aspect-video bg-gradient-card rounded-lg flex items-center justify-center mb-4">
-                    <PieChart className="h-16 w-16 text-white opacity-50" />
-                  </div>
-                  <h3 className="text-xl font-semibold mb-2">Photo of Output 2</h3>
-                  <p className="text-muted-foreground">
-                    Visual representations of valuation multiples with statistical analysis
                   </p>
                 </CardContent>
               </Card>

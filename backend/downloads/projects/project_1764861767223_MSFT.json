@@ -1,0 +1,140 @@
+{
+  "projectId": "project_1764861767223_MSFT",
+  "createdAt": "2025-12-04T15:22:47.223Z",
+  "updatedAt": "2025-12-04T15:22:47.552124",
+  "company": {
+    "name": "Microsoft Corporation",
+    "ticker": "MSFT"
+  },
+  "incomeStatement": {
+    "revenue": {
+      "method": "stable",
+      "stableValue": "1"
+    },
+    "grossMargin": {
+      "method": "stable",
+      "stableValue": "2"
+    },
+    "operatingMargin": {
+      "method": "stable",
+      "stableValue": "3"
+    },
+    "taxRate": {
+      "method": "stable",
+      "stableValue": "4"
+    },
+    "interestRateOnDebt": {
+      "method": "stable",
+      "stableValue": "5"
+    }
+  },
+  "balanceSheet": {
+    "depreciation": {
+      "method": "stable",
+      "stableValue": "6"
+    },
+    "inventory": {
+      "method": "stable",
+      "stableValue": "7"
+    },
+    "longTermDebtChange": {
+      "method": "stable",
+      "stableValue": "8"
+    }
+  },
+  "cashFlow": {
+    "shareRepurchases": "-10",
+    "dividendPercentNI": "11",
+    "capex": {
+      "method": "revenue",
+      "value": "-9"
+    }
+  },
+  "dcf": {
+    "beta": {
+      "method": "calculate",
+      "calculated": "",
+      "years": "3",
+      "benchmark": "S&P 500"
+    },
+    "marketRiskPremium": "4.33",
+    "riskFreeRate": "4.06",
+    "terminalGrowthRate": "2.5",
+    "scenario": "bear"
+  },
+  "bearScenario": {
+    "revenue": {
+      "method": "stable",
+      "stableValue": "12"
+    },
+    "grossMargin": {
+      "method": "stable",
+      "stableValue": "13"
+    },
+    "operatingMargin": {
+      "method": "stable",
+      "stableValue": "14"
+    },
+    "taxRate": {
+      "method": "stable",
+      "stableValue": "15"
+    },
+    "depreciationPercentRevenue": "16",
+    "capex": {
+      "method": "revenue",
+      "value": "-17"
+    },
+    "changeInWC": {
+      "method": "stable",
+      "stableValue": "18"
+    },
+    "beta": {
+      "method": "calculate",
+      "calculated": "",
+      "years": "3",
+      "benchmark": "S&P 500"
+    }
+  },
+  "bullScenario": {
+    "revenue": {
+      "method": "stable",
+      "stableValue": "19"
+    },
+    "grossMargin": {
+      "method": "stable",
+      "stableValue": "20"
+    },
+    "operatingMargin": {
+      "method": "stable",
+      "stableValue": "21"
+    },
+    "taxRate": {
+      "method": "stable",
+      "stableValue": "22"
+    },
+    "depreciationPercentRevenue": "23",
+    "capex": {
+      "method": "revenue",
+      "value": "-24"
+    },
+    "changeInWC": {
+      "method": "stable",
+      "stableValue": "25"
+    },
+    "beta": {
+      "method": "calculate",
+      "calculated": "",
+      "years": "3",
+      "benchmark": "S&P 500"
+    }
+  },
+  "relativeValuation": {
+    "competitors": [
+      "ORCL",
+      "TSLA",
+      "AMZN",
+      "AAPL"
+    ]
+  },
+  "historicals": null
+}

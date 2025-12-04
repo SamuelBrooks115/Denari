@@ -1,0 +1,40 @@
+*   [33m4dfa18d[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mdev[m[33m, [m[1;31morigin/dev[m[33m)[m Merge Ian's-Playground into dev - include all frontend updates and resolve backend conflicts
+[31m|[m[32m\[m  
+[31m|[m * [33m6dcfcff[m[33m ([m[1;31morigin/Ian's-Playground[m[33m, [m[1;32mIan's-Playground[m[33m)[m Update Model tab to navigate to My Projects page
+[31m|[m * [33m8403981[m Update News section: reduce to 2 articles with new content about MVP progress and Ideas Gala networking, center cards for professional layout
+[31m|[m * [33m62b4857[m Add Industry Screener feature, fix changeInWC in JSON output, require 4 competitors, and improve company selection from screener
+[31m|[m * [33ma5393cf[m Disable mouse wheel on number inputs and set beta method default to calculate
+* [32m|[m   [33mdc3cf68[m Merge Ian's-Playground into dev - resolve conflicts in NewProjectWizard.tsx
+[33m|[m[34m\[m [32m\[m  
+[33m|[m * [32m\[m   [33m4e4ca4c[m Merge pull request #51 from SamuelBrooks115/feature/writing_to_excel
+[33m|[m [32m|[m[36m\[m [32m\[m  
+[33m|[m [32m|[m [36m|[m[32m/[m  
+[33m|[m [32m|[m[32m/[m[36m|[m   
+[33m|[m [32m|[m * [33mf2eb8eb[m Add DCF scenario helpers and update Excel export logic
+[33m|[m [32m|[m * [33m6ae0840[m downloads
+[33m|[m [32m|[m * [33m0322d9a[m Add assumptions table population to 3 Statement sheet
+[33m|[m [32m|[m * [33m88743d1[m Enhance Excel export and RV sheet population logic
+[33m|[m [32m|[m[32m/[m  
+* [32m|[m   [33m7f9ff6d[m Merge Ian's-Playground into dev: Frontend UI/UX improvements and feature enhancements
+[1;31m|[m[1;32m\[m [32m\[m  
+[1;31m|[m [1;32m|[m [32m|[m * [33mca24574[m[33m ([m[1;31morigin/revert-49-feature/tagmapping[m[33m)[m Revert "Feature/tagmapping"
+[1;31m|[m [1;32m|[m [32m|[m[32m/[m  
+[1;31m|[m [1;32m|[m [32m|[m *   [33m500584a[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m)[m Merge pull request #50 from SamuelBrooks115/dev
+[1;31m|[m [1;32m|[m [32m|[m [1;34m|[m[32m\[m  
+[1;31m|[m [1;32m|[m [32m|[m [1;34m|[m[32m/[m  
+[1;31m|[m [1;32m|[m [32m|[m[32m/[m[1;34m|[m   
+[1;31m|[m [1;32m|[m * [1;34m|[m   [33ma2bb6fc[m[33m ([m[1;31morigin/soph-zone[m[33m)[m Merge pull request #48 from SamuelBrooks115/Ian's-Playground
+[1;31m|[m [1;32m|[m [1;36m|[m[31m\[m [1;34m\[m  
+[1;31m|[m [1;32m|[m [1;36m|[m * [1;34m\[m   [33md8b937d[m Merge branch 'dev' into Ian's-Playground
+[1;31m|[m [1;32m|[m [1;36m|[m [32m|[m[1;36m\[m [1;34m\[m  
+[1;31m|[m [1;32m|[m [1;36m|[m [32m|[m[1;36m/[m [1;34m/[m  
+[1;31m|[m [1;32m|[m [1;36m|[m[1;36m/[m[32m|[m [1;34m|[m   
+[1;31m|[m [1;32m|[m * [32m|[m [1;34m|[m   [33me9e2a0b[m Merge pull request #49 from SamuelBrooks115/feature/tagmapping
+[1;31m|[m [1;32m|[m [34m|[m[35m\[m [32m\[m [1;34m\[m  
+[1;31m|[m [1;32m|[m [34m|[m * [32m|[m [1;34m|[m [33m37ea4c6[m[33m ([m[1;31morigin/feature/tagmapping[m[33m)[m Industry screener
+[1;31m|[m [1;32m|[m * [35m|[m [32m|[m [1;34m|[m   [33mfb79f61[m Merge pull request #47 from SamuelBrooks115/features/modeling_sme
+[1;31m|[m [1;32m|[m [36m|[m[1;31m\[m [35m\[m [32m\[m [1;34m\[m  
+[1;31m|[m [1;32m|[m [36m|[m * [35m\[m [32m\[m [1;34m\[m   [33mf891b18[m Merge branch 'dev' into features/modeling_sme
+[1;31m|[m [1;32m|[m [36m|[m [1;32m|[m[36m\[m [35m\[m [32m\[m [1;34m\[m  
+[1;31m|[m [1;32m|[m [36m|[m [1;32m|[m[36m/[m [35m/[m [32m/[m [1;34m/[m  
+[1;31m|[m [1;32m|[m [36m|[m[36m/[m[1;32m|[m [35m|[m [32m|[m [1;34m|[m   
